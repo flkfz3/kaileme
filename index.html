@@ -240,6 +240,7 @@
           <select id="f-type" onchange="applyTypeDefault()">
             <option value="组会" data-i18n="ty.组会"></option>
             <option value="组内报告" data-i18n="ty.组内报告"></option>
+            <option value="Project meeting" data-i18n="ty.Project meeting"></option>
             <option value="seminar" data-i18n="ty.seminar"></option>
             <option value="conference" data-i18n="ty.conference"></option>
             <option value="其他" data-i18n="ty.其他"></option>
@@ -290,6 +291,7 @@
             <option value="" data-i18n="all"></option>
             <option value="组会" data-i18n="ty.组会"></option>
             <option value="组内报告" data-i18n="ty.组内报告"></option>
+            <option value="Project meeting" data-i18n="ty.Project meeting"></option>
             <option value="seminar" data-i18n="ty.seminar"></option>
             <option value="conference" data-i18n="ty.conference"></option>
             <option value="其他" data-i18n="ty.其他"></option>
@@ -411,7 +413,8 @@ const I18N={
   'msg.needCloud':'Configure Supabase first (Settings tab)',
   'msg.migrated':'Uploaded {n} records to cloud',
   'ask.migrate':'Upload {n} local records to the cloud database?',
-  'ty.组会':'Lab meeting','ty.组内报告':'Lab talk','ty.seminar':'Seminar',
+  'ty.组会':'Lab meeting','ty.组内报告':'Lab talk',
+  'ty.Project meeting':'Project meeting','ty.seminar':'Seminar',
   'ty.conference':'Conference','ty.其他':'Other',
   'ro.none':'—','ro.oral':'Oral','ro.poster':'Poster','ro.attendee':'Attendee',
   'ro.chair':'Chair','ro.其他':'Other',
@@ -434,7 +437,7 @@ const I18N={
   'imp.none':'No events matched the keywords',
   's.title':'Google Calendar integration settings','s.client':'OAuth Client ID (see SETUP.md)',
   's.kw':'Keywords (match title/description, comma-separated)',
-  's.kwph':'meeting,seminar,conference,talk,workshop',
+  's.kwph':'meet,zoom,seminar,conference,talk,colloquium,workshop',
   's.mapTitle':'Keyword → meeting-type mapping',
   's.mapNote':'Events matching the left keyword get the right type; unmatched → Other.',
   addRow:'+ Add row',saveSet:'Save settings','kw.ph':'keyword',
@@ -478,7 +481,8 @@ const I18N={
   'msg.needCloud':'先在设置里配置 Supabase',
   'msg.migrated':'已上传 {n} 条到云',
   'ask.migrate':'把 {n} 条本地记录上传到云数据库？',
-  'ty.组会':'组会 (lab meeting)','ty.组内报告':'组内报告 (lab talk)','ty.seminar':'seminar',
+  'ty.组会':'组会 (lab meeting)','ty.组内报告':'组内报告 (lab talk)',
+  'ty.Project meeting':'项目会议 (project meeting)','ty.seminar':'seminar',
   'ty.conference':'conference','ty.其他':'其他',
   'ro.none':'—','ro.oral':'oral（口头报告）','ro.poster':'poster（海报）',
   'ro.attendee':'attendee（仅参会）','ro.chair':'chair（主持/分会主席）','ro.其他':'其他',
@@ -501,7 +505,7 @@ const I18N={
   'imp.none':'没有命中关键词的日程',
   's.title':'Google 日历接入设置','s.client':'OAuth Client ID（见 SETUP.md）',
   's.kw':'关键词（命中标题/描述任一即视为会议，英文逗号分隔）',
-  's.kwph':'meeting,seminar,conference,talk,workshop',
+  's.kwph':'meet,zoom,seminar,conference,talk,colloquium,workshop',
   's.mapTitle':'关键词 → 会议类型映射',
   's.mapNote':'命中左边关键词的日程，导入时类型设右边；没命中归「其他」。',
   addRow:'+ 加一行',saveSet:'保存设置','kw.ph':'关键词',
@@ -647,9 +651,9 @@ function modalResolve(v){document.getElementById('modalBg').classList.remove('sh
   if(_modalCb){_modalCb(v);_modalCb=null}}
 
 function defaultSettings(){return{clientId:'',supaUrl:'',supaKey:'',
-  keywords:['meeting','seminar','conference','talk','workshop'],
-  map:[['seminar','seminar'],['conference','conference'],['talk','组内报告'],
-       ['lab meeting','组会'],['group meeting','组会']]}}
+  keywords:['meet','zoom','seminar','conference','talk','colloquium','workshop'],
+  map:[['seminar','seminar'],['colloquium','seminar'],['talk','seminar'],
+       ['conference','conference'],['meet','Project meeting']]}}
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem(SKEY));
   return s&&s.keywords?s:defaultSettings()}catch(e){return defaultSettings()}}
 function saveSettings(){
@@ -669,11 +673,12 @@ function saveSettings(){
 const TYPE_DEFAULT={
   '组会':{venue:'线上',detail:'Zoom',name:'dn.组会'},
   '组内报告':{venue:'线上',detail:'Zoom',name:'dn.组内报告'},
+  'Project meeting':{venue:'线上',detail:'Zoom',name:''},
   'seminar':{venue:'线下',detail:'Caldwell Hall, UGA',name:''},
   'conference':{venue:'线下',detail:'',name:''},
   '其他':null
 };
-const TYPES=['组会','组内报告','seminar','conference','其他'];
+const TYPES=['组会','组内报告','Project meeting','seminar','conference','其他'];
 
 function applyTypeDefault(){
   const tp=document.getElementById('f-type').value;
@@ -943,8 +948,9 @@ function mapEvent(ev){
   if(ev.end&&ev.end.date&&de&&de!==ds){
     const d=new Date(de);d.setDate(d.getDate()-1);de=d.toISOString().slice(0,10);}
   const hay=((ev.summary||'')+' '+(ev.description||'')).toLowerCase();
-  let type='其他';
-  for(const [k,tp] of (SET.map||[])){if(k&&hay.includes(k)){type=tp;break}}
+  // only an event titled *exactly* "lab meeting" is the real lab meeting
+  let type=(ev.summary||'').trim().toLowerCase()==='lab meeting'?'组会':'其他';
+  if(type==='其他')for(const [k,tp] of (SET.map||[])){if(k&&hay.includes(k)){type=tp;break}}
   const loc=(ev.location||'').trim();
   return{type,name:ev.summary||'(no title)',dateStart:ds,dateEnd:de===ds?'':de,
     venueMode:loc?(/zoom|meet|teams|webex/i.test(loc)?'线上':'线下'):'线上',

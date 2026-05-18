@@ -22,17 +22,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const env = (k: string, d = "") => Deno.env.get(k) ?? d;
 
-// keyword -> meeting type, mirrors the web app's default mapping
-const TYPE_MAP: [string, string][] = [
-  ["seminar", "seminar"],
-  ["conference", "conference"],
-  ["talk", "组内报告"],
-  ["lab meeting", "组会"],
-  ["group meeting", "组会"],
-];
-
-function mapType(hay: string): string {
-  for (const [k, t] of TYPE_MAP) if (hay.includes(k)) return t;
+// Title/keyword -> meeting type. Order matters; first match wins.
+// Rule (per user): ONLY an event whose title is *exactly* "lab meeting"
+// is the real lab meeting (组会). "Magdy's lab meeting", "meet with vet",
+// etc. are NOT — anything else that mentions meet/meeting is a project
+// meeting. talk / colloquium / seminar all count as a seminar.
+function mapType(title: string, hay: string): string {
+  const t = title.trim().toLowerCase();
+  if (t === "lab meeting") return "组会";
+  if (hay.includes("seminar") || hay.includes("colloquium") ||
+      hay.includes("talk")) return "seminar";
+  if (hay.includes("conference")) return "conference";
+  if (hay.includes("meet")) return "Project meeting"; // meet & meeting
   return "其他";
 }
 
@@ -67,7 +68,7 @@ function rowFromEvent(ev: any, owner: string) {
   const online = !loc || /zoom|meet\.google|teams|webex/i.test(loc);
   return {
     id: "gcal:" + ev.id,
-    type: mapType(hay),
+    type: mapType(ev.summary || "", hay),
     name: ev.summary || "(no title)",
     date_start: ds || null,
     date_end: de && de !== ds ? de : null,
@@ -85,7 +86,7 @@ Deno.serve(async () => {
   try {
     const owner = env("OWNER_USER_ID");
     if (!owner) throw new Error("OWNER_USER_ID not set");
-    const kws = env("GCAL_KEYWORDS", "meet,zoom,seminar,conference,talk,workshop")
+    const kws = env("GCAL_KEYWORDS", "meet,zoom,seminar,conference,talk,colloquium,workshop")
       .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const daysBack = parseInt(env("GCAL_DAYS_BACK", "180"), 10);
     const cal = encodeURIComponent(env("GCAL_CALENDAR", "primary"));
