@@ -177,16 +177,43 @@
   .modal-bg.show .modal{transform:scale(1)}
   .modal p{font-size:15px;margin-bottom:20px}
   .modal .mf{display:flex;gap:10px;justify-content:flex-end}
+  #authGate{position:fixed;inset:0;z-index:200;display:flex;
+    align-items:center;justify-content:center;padding:24px}
+  #authGate .auth-card{background:rgba(255,255,255,.86);
+    -webkit-backdrop-filter:blur(20px) saturate(150%);
+    backdrop-filter:blur(20px) saturate(150%);
+    border:1px solid rgba(255,255,255,.6);border-radius:var(--r-l);
+    box-shadow:0 16px 50px rgba(7,18,55,.34);
+    padding:34px 30px;width:340px;max-width:92vw;text-align:center}
+  #authGate .auth-logo{font-size:40px;margin-bottom:6px}
+  #authGate .auth-title{font-size:21px;font-weight:800;color:var(--accent);
+    letter-spacing:1px;margin-bottom:6px}
+  #authGate .auth-note{font-size:12.5px;color:var(--muted);
+    margin-bottom:18px;line-height:1.6}
+  #authGate input{margin-bottom:12px}
+  #authGate button{width:100%;margin-bottom:10px}
   @media(max-width:680px){.grid,.stats-cards{grid-template-columns:1fr}
     .bar-row .lab{width:96px}.hero-tools{position:static;margin-top:14px}
     .hero{padding:22px}}
 </style>
 </head>
 <body>
+<div id="authGate" class="hidden">
+  <div class="auth-card">
+    <div class="auth-logo">🗓️</div>
+    <div class="auth-title" data-i18n="auth.title"></div>
+    <div class="auth-note" data-i18n="auth.note"></div>
+    <input id="au-email" type="email" data-ph="auth.email" autocomplete="username">
+    <input id="au-pw" type="password" data-ph="auth.pw" autocomplete="current-password">
+    <button class="primary" data-i18n="auth.signIn" onclick="doSignIn()"></button>
+    <button data-i18n="auth.signUp" onclick="doSignUp()"></button>
+  </div>
+</div>
 <div class="wrap">
   <div class="hero">
     <div class="hero-tools">
       <button class="lang-btn" id="langBtn" onclick="toggleLang()">中</button>
+      <button id="signOutBtn" class="hidden" data-i18n="signOut" onclick="doSignOut()"></button>
       <button data-i18n="exportBackup" onclick="exportJSON()"></button>
       <button data-i18n="importBackup" onclick="document.getElementById('importFile').click()"></button>
       <input type="file" id="importFile" accept="application/json" class="hidden" onchange="importJSON(event)">
@@ -369,6 +396,13 @@ const I18N={
   'f.notes':'Notes (talk title / people met / takeaways / TODO)',
   'venueph.on':'Online platform (e.g. Zoom, Teams)','venueph.off':'In-person venue (e.g. San Diego, CA)',
   save:'Save',cancelEdit:'Cancel edit',
+  'auth.title':'Sign in',
+  'auth.note':'Your meeting data is private to your account. Sign in to see it on any device — others cannot see it even if they have the app URL and key.',
+  'auth.email':'Email','auth.pw':'Password',
+  'auth.signIn':'Sign in','auth.signUp':'Create account',signOut:'Sign out',
+  'msg.signUp':'Account created — sign in now (check email if confirmation is required)',
+  'msg.authFail':'Sign-in failed — check email / password',
+  'msg.signedOut':'Signed out',
   's.cloud':'Cloud sync (Supabase)',
   's.cloudNote':'Free cloud database — any device that opens this page stays in sync automatically. One-time setup (~5 min) in SUPABASE_SETUP.md.',
   's.supaUrl':'Supabase Project URL','s.supaKey':'Supabase anon public key',
@@ -429,6 +463,13 @@ const I18N={
   'f.notes':'备注（报告题目 / 认识的人 / 心得 / TODO）',
   'venueph.on':'线上平台（如 Zoom、Teams）','venueph.off':'线下地点（如 San Diego, CA）',
   save:'保存',cancelEdit:'取消编辑',
+  'auth.title':'登录',
+  'auth.note':'你的会议数据只属于你的账号。登录后任何设备都能看到；别人即使有网址和 key 也看不到你的数据。',
+  'auth.email':'邮箱','auth.pw':'密码',
+  'auth.signIn':'登录','auth.signUp':'注册账号',signOut:'登出',
+  'msg.signUp':'账号已创建——现在可以登录（如需邮箱确认请查收邮件）',
+  'msg.authFail':'登录失败——检查邮箱 / 密码',
+  'msg.signedOut':'已登出',
   's.cloud':'云同步（Supabase）',
   's.cloudNote':'免费云数据库——任何设备打开此页都自动同步。一次性配置（约 5 分钟）见 SUPABASE_SETUP.md。',
   's.supaUrl':'Supabase Project URL','s.supaKey':'Supabase anon public key',
@@ -514,10 +555,42 @@ function _fromRow(x){return{id:x.id,type:x.type||'',name:x.name||'',
   sourceId:x.source_id||'',createdAt:x.created_at||''}}
 function initCloud(){
   if(SET.supaUrl&&SET.supaKey&&window.supabase){
-    try{sb=window.supabase.createClient(SET.supaUrl,SET.supaKey);cloud=true}
+    try{sb=window.supabase.createClient(SET.supaUrl,SET.supaKey);cloud=true;
+      sb.auth.onAuthStateChange((_e,session)=>updateAuthUI(!!session));}
     catch(e){sb=null;cloud=false}
   }else{sb=null;cloud=false}
 }
+function updateAuthUI(authed){
+  const g=document.getElementById('authGate');
+  const so=document.getElementById('signOutBtn');
+  if(!cloud){g.classList.add('hidden');so.classList.add('hidden');return}
+  if(authed){g.classList.add('hidden');so.classList.remove('hidden');pullCloud();}
+  else{g.classList.remove('hidden');so.classList.add('hidden');}
+}
+async function refreshAuthGate(){
+  if(!cloud){document.getElementById('authGate').classList.add('hidden');return}
+  try{const {data}=await sb.auth.getSession();
+    updateAuthUI(!!(data&&data.session));}
+  catch(e){updateAuthUI(false);}
+}
+async function doSignIn(){
+  if(!sb){toast(t('msg.needClient'),'err');return}
+  const em=document.getElementById('au-email').value.trim();
+  const pw=document.getElementById('au-pw').value;
+  if(!em||!pw){toast(t('msg.authFail'),'err');return}
+  const {error}=await sb.auth.signInWithPassword({email:em,password:pw});
+  if(error)toast(t('msg.authFail'),'err');
+}
+async function doSignUp(){
+  if(!sb){toast(t('msg.needClient'),'err');return}
+  const em=document.getElementById('au-email').value.trim();
+  const pw=document.getElementById('au-pw').value;
+  if(!em||!pw){toast(t('msg.authFail'),'err');return}
+  const {error}=await sb.auth.signUp({email:em,password:pw});
+  if(error)toast(t('msg.authFail')+': '+error.message,'err');
+  else toast(t('msg.signUp'),'ok');
+}
+async function doSignOut(){if(sb){await sb.auth.signOut();toast(t('msg.signedOut'));}}
 let _pushing=false,_pushAgain=false;
 async function pushCloud(){
   if(!cloud)return;
@@ -906,7 +979,7 @@ document.querySelectorAll('section .card').forEach(el=>el.classList.add('reveal'
 document.getElementById('modalBg').addEventListener('click',e=>{
   if(e.target.id==='modalBg')modalResolve(false)});
 applyLang();resetForm();updateCount();renderHero();observeReveals();
-initCloud();if(cloud)pullCloud();
+initCloud();refreshAuthGate();
 </script>
 </body>
 </html>

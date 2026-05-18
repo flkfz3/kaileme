@@ -1,83 +1,117 @@
-# Cloud sync setup (Supabase) — ~5 minutes, one-time
+# Cloud sync setup (Supabase + login) — real privacy, free, auto-sync
 
-The Aurora web app stays exactly as-is (look, animations, bilingual). This
-just gives it a free cloud database so **any device that opens the page
-shows the same data, synced automatically**. No middle layer needed —
-Supabase is built for browsers to connect directly.
+The Aurora web app stays exactly as-is. This connects it to a free Supabase
+cloud database **with a login**, so:
 
-## Why a Supabase account is unavoidable
+- **Auto cross-device sync, free.**
+- **Real privacy**: data is tied to *your account*. Even if someone has the
+  app URL and the public key, **without your login they cannot read or write
+  a single row**. (This replaces the earlier "anyone with the key can read"
+  trade-off — now it's a true per-account lock.)
+- **Switching devices is just "log in"** — no more copying a key string
+  around; email + password, which everyone understands.
 
-"Independent good-looking page + auto cloud sync + free" requires the data
-to live in *some* cloud, which requires *one* cloud account. Supabase is the
-least-effort one: its frontend key is designed to be public (unlike a Notion
-token), so the static page can talk to it directly with no proxy server.
+You already created the project and ran the first table SQL. Do the rest in
+this order (order matters — create your login *before* tightening security):
 
-## Steps
+---
 
-1. Go to https://supabase.com → **Sign in** (GitHub / Google login is fine).
-2. **New project**:
-   - Name: `kaileme` (anything)
-   - Database password: set any password — you do **not** need to remember
-     it; the web app never uses it.
-   - Region: closest to you. Create. Wait 1–2 min for it to provision.
-3. Left sidebar → **SQL Editor** → New query → paste this and **Run**:
+## 1. (Optional but recommended) Turn off email confirmation
 
-   ```sql
-   create table if not exists meetings (
-     id text primary key,
-     type text, name text,
-     date_start text, date_end text,
-     venue_mode text, venue_detail text,
-     role text, notes text,
-     source_id text, created_at text
-   );
-   alter table meetings enable row level security;
-   create policy "kaileme anon all" on meetings
-     for all to anon using (true) with check (true);
-   ```
+So that signing up lets you log in immediately without waiting for a
+confirmation email:
 
-   (The policy line lets the page's public key read/write this one table.
-   Without it Supabase blocks everything by default and the page would
-   connect but show/save nothing.)
+- Supabase → **Authentication** → **Sign In / Providers** (or **Settings**)
+  → **Email** → turn **OFF** "Confirm email" / "Enable email confirmations"
+  → Save.
 
-4. Left sidebar → **Project Settings** (gear) → **API**. Copy two values:
-   - **Project URL** — looks like `https://abcd1234.supabase.co`
-   - **anon public** key (the long `eyJ...` string under "Project API keys",
-     the one labelled **anon / public** — NOT the `service_role` one)
+(If you leave it on, after signing up you must click a link in an email
+before you can log in. Off is simpler for a single personal user.)
 
-5. Open the web app `https://flkfz3.github.io/kaileme/` → **Settings** tab →
-   under **Cloud sync (Supabase)** paste:
-   - Project URL → "Supabase Project URL"
-   - anon public key → "Supabase anon public key"
-   - Click **Save settings**
+## 2. Put the connection values into the app
 
-6. Click **⬆ Upload local data to cloud** once — this pushes whatever you
-   already recorded in the browser up to the cloud.
+Open `https://flkfz3.github.io/kaileme/?v=7` → **Settings** tab →
+**Cloud sync (Supabase)**:
 
-Done. From now on every add/edit/delete goes to the cloud, and opening the
-page on any device (phone, another laptop) pulls the latest automatically.
+- **Supabase Project URL**: `https://kbcftsexzmxjtlljgcyi.supabase.co`
+- **Supabase key**: `sb_publishable_KHDCXbLrlL6pQiLKhgfH-A_Fxxg5Un6`
+- **Save settings**
 
-## What this means for privacy
+A login screen will now appear (because cloud is configured).
 
-- The **anon public key is meant to be public** — it's safe to have it in
-  the page; that is Supabase's intended design. Security is enforced by the
-  table policy, not by hiding the key.
-- For simplicity this setup uses a permissive policy: **anyone who knows
-  both your Project URL and anon key could read/write this `meetings`
-  table.** For low-sensitivity data (your own meeting log) this is an
-  accepted trade-off and is how most personal single-user apps start.
-- If you ever want it locked to only you, that requires Supabase Auth
-  (email login + a per-user policy) — more setup; can be added later.
-- Your meeting data is **not** in the public GitHub repo. Only `index.html`
-  is public; it contains no URL or key (you paste those into the app at
-  runtime, stored in your browser).
+## 3. Create your account
+
+On that login screen → enter your email + a password → **Create account**.
+(With step 1 done, it logs you in right away.) You are now signed in; your
+data area appears.
+
+## 4. Upload your existing local records
+
+Settings tab → **⬆ Upload local data to cloud** (once). This pushes whatever
+you had recorded in the browser into the cloud, tagged to your account.
+
+## 5. Tighten security — run this in SQL Editor
+
+Now that you have an account and are logged in, lock the table so **only a
+logged-in owner can touch their own rows**. Supabase → **SQL Editor** →
+New query → paste and **Run**:
+
+```sql
+-- add an owner column; new rows auto-belong to the logged-in user
+alter table meetings add column if not exists owner uuid default auth.uid();
+-- backfill any rows that have no owner yet to YOU (run while logged in via app;
+-- if this returns 0 rows that's fine, the app fills owner on upload)
+update meetings set owner = auth.uid() where owner is null;
+-- remove the old "anyone with the key" policy
+drop policy if exists "kaileme anon all" on meetings;
+-- new policy: must be logged in AND can only see/edit your own rows
+drop policy if exists "own rows" on meetings;
+create policy "own rows" on meetings
+  for all to authenticated
+  using (owner = auth.uid()) with check (owner = auth.uid());
+```
+
+Note: the `update ... set owner = auth.uid()` line only works the way you
+want if run from a context that has your user identity. Simpler and safer:
+**do step 4 (Upload) first while logged in** — the app stamps every uploaded
+row with your account automatically — then this SQL's `update` line just
+mops up any strays (often 0).
+
+After this runs, the anonymous/public key alone can no longer read or write
+anything — every request must carry your login. Done.
+
+---
+
+## Daily use
+
+- Open `https://flkfz3.github.io/kaileme/` on any device. Same browser as
+  before → still logged in. New device / cleared cache → it shows the login
+  screen; enter the same email + password → your data loads from the cloud.
+- Add / edit / delete → synced to the cloud automatically, scoped to you.
+- The app still works fully offline-ish per-browser if Supabase isn't
+  configured, but the whole point now is the logged-in cloud.
+
+## Privacy (the real version now)
+
+- Data is row-locked to your account via Supabase Auth + RLS. Someone with
+  the URL and public key but **no login gets nothing** — every read/write is
+  rejected unless the request carries your authenticated session.
+- The public key in the app settings is, by design, safe to be public; it no
+  longer grants data access on its own.
+- Only `index.html` is in the public GitHub repo — no URL, no key, no data,
+  no password. You type the URL+key into the app (stored in your browser),
+  and your password is never stored anywhere by the app (Supabase handles it,
+  hashed).
 
 ## Troubleshooting
 
-- Page connects but list is empty / save does nothing → the SQL policy in
-  step 3 wasn't run (or RLS is on without the policy). Re-run step 3.
-- "Cloud sync error — check Supabase URL / key" toast → the URL or anon key
-  is wrong, or you pasted the `service_role` key instead of `anon`.
-- Want to start over → in Supabase SQL Editor: `delete from meetings;`
-- The web app still works fully **without** Supabase (data stays in that
-  one browser); Supabase only adds the cross-device cloud sync.
+- Login screen never goes away after correct password → step 1 (email
+  confirmation still on) or wrong password. Check Authentication → Users in
+  Supabase to see if the account exists / is confirmed.
+- "Sign-in failed" → wrong email/password, or account not created yet
+  (use **Create account** first).
+- After step 5, the app shows nothing even logged in → the `update owner`
+  didn't tag your rows. Re-run step 4 (Upload) while logged in, or in SQL
+  Editor: `update meetings set owner = (select id from auth.users limit 1);`
+  (works because there's only one user — you).
+- Start over: SQL Editor → `delete from meetings;`
