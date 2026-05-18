@@ -169,6 +169,15 @@
   .hm-legend{display:flex;align-items:center;gap:5px;justify-content:flex-end;
     font-size:11px;color:var(--muted);margin-top:12px}
   .hm-legend .hm-c{width:11px;height:11px}
+  .vac{flex:1;position:relative}
+  .vac-box{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:50;
+    background:rgba(255,255,255,.97);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    box-shadow:var(--sh-md);max-height:230px;overflow-y:auto}
+  .vac-item{padding:9px 13px;font-size:13px;color:var(--ink);cursor:pointer;
+    border-bottom:1px solid var(--line);line-height:1.45}
+  .vac-item:last-child{border-bottom:none}
+  .vac-item:hover{background:var(--accent-soft)}
   .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
   .banner{font-size:13px;padding:12px 15px;border-radius:10px;margin-bottom:16px;line-height:1.6}
   .banner.warn{background:#fff7e8;border:1px solid #f0dba8;color:#7a5b16}
@@ -291,7 +300,11 @@
             <span><input type="radio" name="venue" value="线上" id="v-on" onchange="toggleVenue()"><span data-i18n="online"></span></span>
             <span><input type="radio" name="venue" value="线下" id="v-off" onchange="toggleVenue()"><span data-i18n="offline"></span></span>
           </div>
-          <input id="f-venueDetail" style="flex:1">
+          <div class="vac">
+            <input id="f-venueDetail" style="width:100%" autocomplete="off"
+              oninput="venueLookup()" onblur="hideVac()">
+            <div id="vacBox" class="vac-box hidden"></div>
+          </div>
         </div>
       </div>
       <div class="field hidden" id="roleField"><label data-i18n="f.role"></label>
@@ -744,6 +757,38 @@ function applyTypeDefault(){
 function toggleVenue(){
   const on=document.getElementById('v-on').checked;
   document.getElementById('f-venueDetail').placeholder=t(on?'venueph.on':'venueph.off');
+  if(on)document.getElementById('vacBox').classList.add('hidden');
+}
+let _vacT,_vacAbort;
+function hideVac(){setTimeout(()=>{
+  const b=document.getElementById('vacBox');if(b)b.classList.add('hidden');},160)}
+function pickVenue(el){
+  document.getElementById('f-venueDetail').value=el.dataset.v;
+  document.getElementById('vacBox').classList.add('hidden');
+}
+// Free address autocomplete via OpenStreetMap Nominatim — only for in-person
+// venues. No API key / billing / Google Cloud. Debounced to respect usage.
+function venueLookup(){
+  const inp=document.getElementById('f-venueDetail');
+  const box=document.getElementById('vacBox');
+  const offline=document.getElementById('v-off').checked;
+  const q=inp.value.trim();
+  clearTimeout(_vacT);
+  if(!offline||q.length<3){box.classList.add('hidden');return}
+  _vacT=setTimeout(async()=>{
+    try{
+      if(_vacAbort)_vacAbort.abort();
+      _vacAbort=new AbortController();
+      const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=6&q='
+        +encodeURIComponent(q),{signal:_vacAbort.signal,
+        headers:{'Accept':'application/json'}});
+      const arr=await r.json();
+      if(!Array.isArray(arr)||!arr.length){box.classList.add('hidden');return}
+      box.innerHTML=arr.map(a=>`<div class="vac-item" onmousedown="pickVenue(this)" `
+        +`data-v="${esc(a.display_name)}">${esc(a.display_name)}</div>`).join('');
+      box.classList.remove('hidden');
+    }catch(e){if(e.name!=='AbortError')box.classList.add('hidden')}
+  },450);
 }
 
 function switchTab(tp){
