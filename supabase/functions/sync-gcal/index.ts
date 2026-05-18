@@ -219,21 +219,22 @@ Deno.serve(async (req: Request) => {
       { auth: { persistSession: false } },
     );
 
-    // Merge strategy — the WEBSITE is authoritative. New calendar events are
+    // Merge strategy — the APP is authoritative. New calendar events are
     // inserted. For events already synced before:
     //   - if the row was edited by the user in the app (edited = true) it is
-    //     SKIPPED entirely — the calendar never overwrites a website edit
-    //     (user's explicit rule: app edits win over everything);
-    //   - otherwise objective fields (name / dates / venue) and the
-    //     machine-derived `type` are refreshed from the calendar (so an
-    //     untouched row that was misclassified by an old rule self-corrects),
-    //     and `notes` is back-filled only when the stored note is empty.
-    // Manually-created rows (non-"gcal:" ids) are never touched at all.
+    //     SKIPPED ENTIRELY: the calendar never touches it again — not the
+    //     name, dates, time, notes, venue, type or role. App edits win over
+    //     everything (user's explicit rule).
+    //   - otherwise (never edited) every calendar-derived field is refreshed
+    //     so an untouched row stays in sync with the calendar and an old
+    //     misclassification self-corrects.
+    // Manually-created rows (non-"gcal:" ids) are not returned by the
+    // calendar at all, so they are never matched and never touched.
     let inserted = 0, updated = 0, skipped = 0;
     if (rows.length) {
       const ids = rows.map((r) => r.id);
       const { data: exist, error: e1 } = await sb.from("meetings")
-        .select("id,notes,edited").in("id", ids);
+        .select("id,edited").in("id", ids);
       if (e1) throw new Error("select existing failed: " + e1.message);
       const exById = new Map(
         (exist || []).map((r: any) => [r.id, r]),
@@ -246,8 +247,9 @@ Deno.serve(async (req: Request) => {
       }
       for (const r of rows.filter((x) => exById.has(x.id))) {
         const ex = exById.get(r.id);
-        // Calendar-owned fields (always refreshed from the calendar):
-        const patch: Record<string, unknown> = {
+        // App edits win: an edited row is frozen against the calendar.
+        if (ex && ex.edited === true) { skipped++; continue; }
+        const { error } = await sb.from("meetings").update({
           name: r.name,
           date_start: r.date_start,
           date_end: r.date_end,
@@ -255,17 +257,10 @@ Deno.serve(async (req: Request) => {
           end_time: r.end_time,
           tz: r.tz,
           notes: r.notes,
-        };
-        // User-editable fields: only (re)written for rows the user has NOT
-        // edited in the app, so manual venue/type/role edits are preserved.
-        if (!ex || ex.edited !== true) {
-          patch.venue_mode = r.venue_mode;
-          patch.venue_detail = r.venue_detail;
-          patch.type = r.type;
-        } else {
-          skipped++;
-        }
-        const { error } = await sb.from("meetings").update(patch).eq("id", r.id);
+          venue_mode: r.venue_mode,
+          venue_detail: r.venue_detail,
+          type: r.type,
+        }).eq("id", r.id);
         if (!error) updated++;
       }
     }
