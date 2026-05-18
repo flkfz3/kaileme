@@ -82,7 +82,19 @@ function rowFromEvent(ev: any, owner: string) {
   };
 }
 
-Deno.serve(async () => {
+// The web app calls this cross-origin (GitHub Pages -> *.supabase.co), so
+// every response needs CORS headers and the preflight OPTIONS must be
+// answered, otherwise the browser blocks the call ("sync failed").
+const CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS });
+  }
   try {
     const owner = env("OWNER_USER_ID");
     if (!owner) throw new Error("OWNER_USER_ID not set");
@@ -213,12 +225,12 @@ Deno.serve(async () => {
         updated,
         skipped,
       }),
-      { headers: { "Content-Type": "application/json" } },
+      { headers: { ...CORS, "Content-Type": "application/json" } },
     );
   } catch (e) {
     return new Response(
       JSON.stringify({ ok: false, error: String(e) }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
+      { status: 500, headers: { ...CORS, "Content-Type": "application/json" } },
     );
   }
 });

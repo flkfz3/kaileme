@@ -273,6 +273,18 @@
         <div class="field"><label data-i18n="f.end"></label>
           <input type="date" id="f-dateEnd"></div>
       </div>
+      <div class="grid">
+        <div class="field"><label data-i18n="f.repeat"></label>
+          <select id="f-repeat">
+            <option value="none" data-i18n="rep.none"></option>
+            <option value="weekday" data-i18n="rep.weekday"></option>
+            <option value="daily" data-i18n="rep.daily"></option>
+            <option value="weekly" data-i18n="rep.weekly"></option>
+            <option value="monthly" data-i18n="rep.monthly"></option>
+          </select></div>
+        <div class="field"><label data-i18n="f.repeatUntil"></label>
+          <input type="date" id="f-repeatUntil"></div>
+      </div>
       <div class="field"><label data-i18n="f.loc"></label>
         <div class="row">
           <div class="radio">
@@ -392,6 +404,10 @@ const I18N={
   'tab.add':'Add','tab.list':'List','tab.stat':'Stats','tab.cal':'Google Calendar','tab.set':'Settings',
   'st.total':'Total','st.conf':'Conferences','st.talks':'Talks given','st.year':'{y}',
   'f.type':'Meeting type *','f.name':'Meeting name *','f.nameph':'e.g. NeurIPS 2026 / group meeting',
+  'f.repeat':'Repeat','f.repeatUntil':'Repeat until',
+  'rep.none':'No repeat','rep.weekday':'Every weekday (Mon–Fri)',
+  'rep.daily':'Every day','rep.weekly':'Every week','rep.monthly':'Every month',
+  'msg.batchAdded':'Added {n} meetings',
   'f.start':'Start date *','f.end':'End date (multi-day, optional)','f.loc':'Location',
   online:'Online',offline:'In person','f.role':'My role (conference only)',
   'f.notes':'Notes (talk title / people met / takeaways / TODO)',
@@ -468,6 +484,10 @@ const I18N={
   'tab.add':'记录','tab.list':'列表','tab.stat':'统计','tab.cal':'Google 日历','tab.set':'设置',
   'st.total':'总记录','st.conf':'conference','st.talks':'做过 talk/poster','st.year':'{y} 年',
   'f.type':'会议类型 *','f.name':'会议名称 *','f.nameph':'如 NeurIPS 2026 / 课题组周会',
+  'f.repeat':'重复','f.repeatUntil':'重复至',
+  'rep.none':'不重复','rep.weekday':'每个工作日（周一–周五）',
+  'rep.daily':'每天','rep.weekly':'每周','rep.monthly':'每月',
+  'msg.batchAdded':'已批量添加 {n} 条会议',
   'f.start':'开始日期 *','f.end':'结束日期（多天会议填，可空）','f.loc':'地点',
   online:'线上',offline:'线下','f.role':'我的角色（仅 conference）',
   'f.notes':'备注（报告题目 / 认识的人 / 心得 / TODO）',
@@ -736,9 +756,27 @@ function switchTab(tp){
   if(tp==='list')renderList();
   if(tp==='stat')renderStat();
   if(tp==='set')renderSettings();
+  // Force-reveal the cards of the tab we just switched to: the scroll-in
+  // IntersectionObserver is unreliable for content that was display:none,
+  // which left whole tabs (e.g. the list) stuck at opacity:0.
+  document.querySelectorAll('#tab-'+tp+' .reveal').forEach(el=>el.classList.add('in'));
   observeReveals();
 }
 
+function genDates(startISO,untilISO,mode){
+  const out=[],end=new Date(untilISO+'T00:00:00');
+  let d=new Date(startISO+'T00:00:00'),guard=0;
+  while(d<=end&&guard++<1000){
+    const dow=d.getDay();
+    if(mode!=='weekday'||(dow>=1&&dow<=5))out.push(
+      d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+
+      String(d.getDate()).padStart(2,'0'));
+    if(mode==='weekly')d.setDate(d.getDate()+7);
+    else if(mode==='monthly')d.setMonth(d.getMonth()+1);
+    else d.setDate(d.getDate()+1);
+  }
+  return out;
+}
 async function saveRecord(){
   const name=document.getElementById('f-name').value.trim();
   const ds=document.getElementById('f-dateStart').value;
@@ -754,6 +792,18 @@ async function saveRecord(){
          ?document.getElementById('f-role').value:'',
     notes:document.getElementById('f-notes').value.trim(),
     sourceId:'',createdAt:new Date().toISOString(),edited:true};
+  // Recurrence: only when adding a NEW record (not editing). Generates one
+  // independent row per occurrence so each can be edited/deleted on its own.
+  const editing=!!document.getElementById('editId').value;
+  const rep=document.getElementById('f-repeat').value;
+  const until=document.getElementById('f-repeatUntil').value;
+  if(!editing&&rep!=='none'&&until){
+    const dates=genDates(ds,until,rep);
+    if(!dates.length){toast(t('msg.needDate'),'err');return}
+    dates.forEach(dt=>DB.push({...rec,id:uid(),dateStart:dt,dateEnd:'',edited:true}));
+    persist();resetForm();updateCount();renderHero();
+    toast(t('msg.batchAdded',{n:dates.length}),'ok');switchTab('list');return;
+  }
   const i=DB.findIndex(r=>r.id===rec.id);
   if(i>=0){
     rec.sourceId=DB[i].sourceId||'';
@@ -775,9 +825,10 @@ async function saveRecord(){
   toast(t('msg.saved'),'ok');switchTab('list');
 }
 function resetForm(){
-  ['editId','f-name','f-dateStart','f-dateEnd','f-venueDetail','f-role','f-notes']
+  ['editId','f-name','f-dateStart','f-dateEnd','f-venueDetail','f-role','f-notes','f-repeatUntil']
     .forEach(id=>document.getElementById(id).value='');
   document.getElementById('f-type').value='组会';
+  document.getElementById('f-repeat').value='none';
   document.querySelectorAll('input[name=venue]').forEach(r=>r.checked=false);
   document.getElementById('cancelBtn').classList.add('hidden');
   applyTypeDefault();
