@@ -129,16 +129,40 @@ Deno.serve(async () => {
       { auth: { persistSession: false } },
     );
 
-    let upserted = 0;
+    // Merge strategy: new calendar events are inserted in full; for events
+    // already synced before, only the OBJECTIVE fields (name / dates /
+    // venue) are refreshed from the calendar — the user-owned fields
+    // (notes, type, role, created_at) are left untouched so anything the
+    // user edited in the app (e.g. a Zoom summary in notes) is never
+    // overwritten by a later cron run. Manually-created rows (non-"gcal:"
+    // ids) are never touched at all.
+    let inserted = 0, updated = 0;
     if (rows.length) {
-      const { error } = await sb.from("meetings")
-        .upsert(rows, { onConflict: "id" });
-      if (error) throw new Error("upsert failed: " + error.message);
-      upserted = rows.length;
+      const ids = rows.map((r) => r.id);
+      const { data: exist, error: e1 } = await sb.from("meetings")
+        .select("id").in("id", ids);
+      if (e1) throw new Error("select existing failed: " + e1.message);
+      const eset = new Set((exist || []).map((r: any) => r.id));
+      const fresh = rows.filter((r) => !eset.has(r.id));
+      if (fresh.length) {
+        const { error } = await sb.from("meetings").insert(fresh);
+        if (error) throw new Error("insert failed: " + error.message);
+        inserted = fresh.length;
+      }
+      for (const r of rows.filter((x) => eset.has(x.id))) {
+        const { error } = await sb.from("meetings").update({
+          name: r.name,
+          date_start: r.date_start,
+          date_end: r.date_end,
+          venue_mode: r.venue_mode,
+          venue_detail: r.venue_detail,
+        }).eq("id", r.id);
+        if (!error) updated++;
+      }
     }
 
     return new Response(
-      JSON.stringify({ ok: true, scanned: items.length, upserted }),
+      JSON.stringify({ ok: true, scanned: items.length, inserted, updated }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (e) {
