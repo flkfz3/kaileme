@@ -314,20 +314,23 @@
   .modal p{font-size:15px;margin-bottom:20px}
   .modal .mf{display:flex;gap:10px;justify-content:flex-end}
   #authGate{position:fixed;inset:0;z-index:200;display:flex;
-    align-items:center;justify-content:center;padding:24px}
+    align-items:flex-start;justify-content:center;
+    overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:24px 16px calc(24px + env(safe-area-inset-bottom))}
   #authGate .auth-card{background:rgba(255,255,255,.86);
     -webkit-backdrop-filter:blur(20px) saturate(150%);
     backdrop-filter:blur(20px) saturate(150%);
     border:1px solid rgba(255,255,255,.6);border-radius:var(--r-l);
     box-shadow:0 16px 50px rgba(7,18,55,.34);
-    padding:34px 30px;width:340px;max-width:92vw;text-align:center}
+    padding:34px 30px;width:340px;max-width:92vw;text-align:center;
+    margin:auto 0}
   #authGate .auth-logo{font-size:40px;margin-bottom:6px}
   #authGate .auth-title{font-size:21px;font-weight:800;color:var(--accent);
     letter-spacing:1px;margin-bottom:6px}
   #authGate .auth-note{font-size:12.5px;color:var(--muted);
     margin-bottom:18px;line-height:1.6}
-  #authGate input{margin-bottom:12px}
-  #authGate button{width:100%;margin-bottom:10px}
+  #authGate input{margin-bottom:12px;font-size:16px}
+  #authGate button{width:100%;margin-bottom:10px;min-height:46px}
   @media(max-width:680px){.grid,.stats-cards{grid-template-columns:1fr}
     .bar-row .lab{width:96px}.hero-tools{position:static;margin-top:14px}
     .hero{padding:22px}}
@@ -363,6 +366,7 @@
       <button class="lang-btn" id="langBtn" onclick="toggleLang()">中</button>
       <span class="sync-info hidden" id="syncInfo"></span>
       <button id="syncBtn" class="hidden" data-i18n="syncNow" onclick="manualSync()"></button>
+      <button id="loginBtn" class="hidden" data-i18n="auth.signIn" onclick="openAuthGate()"></button>
       <button id="signOutBtn" class="hidden" data-i18n="signOut" onclick="doSignOut()"></button>
       <button data-i18n="exportBackup" onclick="exportJSON()"></button>
       <button data-i18n="exportCsv" onclick="exportCSV()"></button>
@@ -839,14 +843,25 @@ function updateAuthUI(authed){
   const g=document.getElementById('authGate');
   const so=document.getElementById('signOutBtn');
   const sy=document.getElementById('syncBtn');
+  const lo=document.getElementById('loginBtn');
   if(!cloud){g.classList.add('hidden');so.classList.add('hidden');
-    sy.classList.add('hidden');return}
+    sy.classList.add('hidden');lo.classList.add('hidden');return}
   if(authed){g.classList.add('hidden');so.classList.remove('hidden');
-    sy.classList.remove('hidden');
+    sy.classList.remove('hidden');lo.classList.add('hidden');
     pullCloud();syncGcal().then(()=>{pullCloud();markSynced();});}
   else{g.classList.remove('hidden');so.classList.add('hidden');
-    sy.classList.add('hidden');}
+    sy.classList.add('hidden');lo.classList.remove('hidden');}
   renderSyncInfo();
+}
+// Always-reachable entry point to the login form (the overlay can scroll
+// off behind the mobile keyboard; this re-opens & focuses it reliably).
+function openAuthGate(){
+  const g=document.getElementById('authGate');
+  if(!g)return;
+  g.classList.remove('hidden');
+  g.scrollTop=0;
+  const em=document.getElementById('au-email');
+  if(em)setTimeout(()=>{try{em.focus();}catch(_){}}, 50);
 }
 async function refreshAuthGate(){
   if(!cloud){document.getElementById('authGate').classList.add('hidden');return}
