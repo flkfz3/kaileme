@@ -130,34 +130,34 @@ Deno.serve(async () => {
       { auth: { persistSession: false } },
     );
 
-    // Merge strategy (self-healing, no manual SQL needed): new events are
-    // inserted in full. For events already synced before:
-    //   - objective fields (name / dates / venue) are always refreshed;
-    //   - `type` is always recomputed from the calendar — it is
-    //     machine-derived, so refreshing it auto-corrects any row that was
-    //     misclassified by an older rule (e.g. a project meeting that used
-    //     to be tagged 组会), with no one-time DELETE needed;
-    //   - `notes` is back-filled from the calendar ONLY when the stored
-    //     note is empty, so a note the user actually typed in the app is
-    //     still never overwritten, while events whose address/notes were
-    //     written in Google Calendar get them filled in.
+    // Merge strategy — the WEBSITE is authoritative. New calendar events are
+    // inserted. For events already synced before:
+    //   - if the row was edited by the user in the app (edited = true) it is
+    //     SKIPPED entirely — the calendar never overwrites a website edit
+    //     (user's explicit rule: app edits win over everything);
+    //   - otherwise objective fields (name / dates / venue) and the
+    //     machine-derived `type` are refreshed from the calendar (so an
+    //     untouched row that was misclassified by an old rule self-corrects),
+    //     and `notes` is back-filled only when the stored note is empty.
     // Manually-created rows (non-"gcal:" ids) are never touched at all.
-    let inserted = 0, updated = 0;
+    let inserted = 0, updated = 0, skipped = 0;
     if (rows.length) {
       const ids = rows.map((r) => r.id);
       const { data: exist, error: e1 } = await sb.from("meetings")
-        .select("id,notes").in("id", ids);
+        .select("id,notes,edited").in("id", ids);
       if (e1) throw new Error("select existing failed: " + e1.message);
-      const noteById = new Map(
-        (exist || []).map((r: any) => [r.id, r.notes]),
+      const exById = new Map(
+        (exist || []).map((r: any) => [r.id, r]),
       );
-      const fresh = rows.filter((r) => !noteById.has(r.id));
+      const fresh = rows.filter((r) => !exById.has(r.id));
       if (fresh.length) {
         const { error } = await sb.from("meetings").insert(fresh);
         if (error) throw new Error("insert failed: " + error.message);
         inserted = fresh.length;
       }
-      for (const r of rows.filter((x) => noteById.has(x.id))) {
+      for (const r of rows.filter((x) => exById.has(x.id))) {
+        const ex = exById.get(r.id);
+        if (ex && ex.edited === true) { skipped++; continue; }
         const patch: Record<string, unknown> = {
           name: r.name,
           date_start: r.date_start,
@@ -166,7 +166,7 @@ Deno.serve(async () => {
           venue_detail: r.venue_detail,
           type: r.type,
         };
-        const cur = noteById.get(r.id);
+        const cur = ex && ex.notes;
         if (!cur || String(cur).trim() === "") patch.notes = r.notes;
         const { error } = await sb.from("meetings").update(patch).eq("id", r.id);
         if (!error) updated++;
@@ -174,7 +174,7 @@ Deno.serve(async () => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, scanned: items.length, inserted, updated }),
+      JSON.stringify({ ok: true, scanned: items.length, inserted, updated, skipped }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (e) {

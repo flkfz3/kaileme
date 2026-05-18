@@ -155,6 +155,10 @@
   .mbar .mn{font-size:11px;color:var(--muted)}
   .mbar .mv{font-size:11px;color:var(--ink);font-weight:650;height:14px}
   .heatmap{overflow-x:auto;padding:4px 0 2px}
+  .hm-wrap{min-width:max-content}
+  .hm-months{display:flex;gap:3px;margin-bottom:5px}
+  .hm-mc{width:13px;font-size:10px;color:var(--muted);white-space:nowrap;
+    overflow:visible;flex:0 0 13px}
   .hm-grid{display:flex;gap:3px;min-width:max-content}
   .hm-col{display:flex;flex-direction:column;gap:3px}
   .hm-c{width:13px;height:13px;border-radius:3px;background:rgba(37,99,235,.09)}
@@ -563,11 +567,11 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 function _toRow(r){return{id:r.id,type:r.type||null,name:r.name||null,
   date_start:r.dateStart||null,date_end:r.dateEnd||null,venue_mode:r.venueMode||null,
   venue_detail:r.venueDetail||null,role:r.role||null,notes:r.notes||null,
-  source_id:r.sourceId||null,created_at:r.createdAt||null}}
+  source_id:r.sourceId||null,created_at:r.createdAt||null,edited:!!r.edited}}
 function _fromRow(x){return{id:x.id,type:x.type||'',name:x.name||'',
   dateStart:x.date_start||'',dateEnd:x.date_end||'',venueMode:x.venue_mode||'',
   venueDetail:x.venue_detail||'',role:x.role||'',notes:x.notes||'',
-  sourceId:x.source_id||'',createdAt:x.created_at||''}}
+  sourceId:x.source_id||'',createdAt:x.created_at||'',edited:!!x.edited}}
 function initCloud(){
   if(SET.supaUrl&&SET.supaKey&&window.supabase){
     try{sb=window.supabase.createClient(SET.supaUrl,SET.supaKey);cloud=true;
@@ -749,7 +753,7 @@ async function saveRecord(){
     role:document.getElementById('f-type').value==='conference'
          ?document.getElementById('f-role').value:'',
     notes:document.getElementById('f-notes').value.trim(),
-    sourceId:'',createdAt:new Date().toISOString()};
+    sourceId:'',createdAt:new Date().toISOString(),edited:true};
   const i=DB.findIndex(r=>r.id===rec.id);
   if(i>=0){
     rec.sourceId=DB[i].sourceId||'';
@@ -764,7 +768,7 @@ async function saveRecord(){
       if(scope==='cancel')return;                 // abort the save entirely
       DB[i]=rec;
       if(scope==='all')same.forEach(r=>{
-        r.venueMode=rec.venueMode;r.venueDetail=rec.venueDetail;});
+        r.venueMode=rec.venueMode;r.venueDetail=rec.venueDetail;r.edited=true;});
     }else DB[i]=rec;
   }else DB.push(rec);
   persist();resetForm();updateCount();renderHero();
@@ -892,6 +896,7 @@ function renderStat(){
   renderHeatmap();
   observeReveals();
 }
+const MON_EN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function renderHeatmap(){
   const box=document.getElementById('heatmap');if(!box)return;
   const cnt={};
@@ -900,19 +905,24 @@ function renderHeatmap(){
   const lvl=v=>!v?'':v>=max*.75?' l4':v>=max*.5?' l3':v>=max*.25?' l2':' l1';
   const end=new Date();end.setHours(0,0,0,0);
   const start=new Date(end);start.setDate(start.getDate()-52*7-end.getDay());
-  let html='<div class="hm-grid">',cur=new Date(start);
+  let mrow='<div class="hm-months">',grid='<div class="hm-grid">';
+  let cur=new Date(start),lastM=-1;
   for(let w=0;w<53;w++){
-    html+='<div class="hm-col">';
+    const m=cur.getMonth();
+    const lab=(m!==lastM)?(LANG==='zh'?(m+1)+'月':MON_EN[m]):'';
+    lastM=m;
+    mrow+=`<div class="hm-mc">${lab}</div>`;
+    grid+='<div class="hm-col">';
     for(let dy=0;dy<7;dy++){
       const iso=cur.toISOString().slice(0,10);
       const v=cur<=end?(cnt[iso]||0):-1;
-      html+=v<0?'<div class="hm-c" style="visibility:hidden"></div>'
+      grid+=v<0?'<div class="hm-c" style="visibility:hidden"></div>'
         :`<div class="hm-c${lvl(v)}" title="${iso}: ${v}"></div>`;
       cur.setDate(cur.getDate()+1);
     }
-    html+='</div>';
+    grid+='</div>';
   }
-  box.innerHTML=html+'</div>';
+  box.innerHTML='<div class="hm-wrap">'+mrow+'</div>'+grid+'</div></div>';
 }
 
 function renderSettings(){
