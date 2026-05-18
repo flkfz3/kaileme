@@ -371,6 +371,15 @@
 </div>
 
 <div id="toast"></div>
+<div class="modal-bg" id="vsBg">
+  <div class="modal"><p id="vsMsg"></p>
+    <div class="mf">
+      <button data-i18n="cancel" onclick="vsResolve('cancel')"></button>
+      <button data-i18n="venueOne" onclick="vsResolve('one')"></button>
+      <button class="primary" data-i18n="venueAll" onclick="vsResolve('all')"></button>
+    </div>
+  </div>
+</div>
 <div class="modal-bg" id="modalBg">
   <div class="modal"><p id="modalMsg"></p>
     <div class="mf">
@@ -420,6 +429,8 @@ const I18N={
   'ty.组会':'Lab meeting','ty.组内报告':'Lab talk',
   'ty.Project meeting':'Project meeting','ty.seminar':'Seminar',
   'ty.conference':'Conference','ty.其他':'Other',
+  'ask.venueScope':'{n} other record(s) have the same name. Apply the new location to all of them?',
+  'venueAll':'Change all','venueOne':'Only this one',
   'ro.none':'—','ro.oral':'Oral','ro.poster':'Poster','ro.attendee':'Attendee',
   'ro.chair':'Chair','ro.其他':'Other',
   'l.year':'Year','l.type':'Type','l.search':'Search (name/notes)','l.searchph':'keyword',
@@ -488,6 +499,8 @@ const I18N={
   'ty.组会':'组会 (lab meeting)','ty.组内报告':'组内报告 (lab talk)',
   'ty.Project meeting':'项目会议 (project meeting)','ty.seminar':'seminar',
   'ty.conference':'conference','ty.其他':'其他',
+  'ask.venueScope':'还有 {n} 条同名记录。把新地点应用到全部同名记录吗？',
+  'venueAll':'全部修改','venueOne':'只改这一条',
   'ro.none':'—','ro.oral':'oral（口头报告）','ro.poster':'poster（海报）',
   'ro.attendee':'attendee（仅参会）','ro.chair':'chair（主持/分会主席）','ro.其他':'其他',
   'l.year':'年份','l.type':'类型','l.search':'搜索（名称/备注）','l.searchph':'关键词',
@@ -653,6 +666,12 @@ function ask(msg){return new Promise(res=>{_modalCb=res;
   document.getElementById('modalBg').classList.add('show');});}
 function modalResolve(v){document.getElementById('modalBg').classList.remove('show');
   if(_modalCb){_modalCb(v);_modalCb=null}}
+let _vsCb=null;
+function askVenueScope(n){return new Promise(res=>{_vsCb=res;
+  document.getElementById('vsMsg').textContent=t('ask.venueScope',{n});
+  document.getElementById('vsBg').classList.add('show');});}
+function vsResolve(v){document.getElementById('vsBg').classList.remove('show');
+  if(_vsCb){_vsCb(v);_vsCb=null}}
 
 function defaultSettings(){return{clientId:'',supaUrl:'',supaKey:'',
   keywords:['meet','zoom','seminar','conference','talk','colloquium','workshop'],
@@ -716,7 +735,7 @@ function switchTab(tp){
   observeReveals();
 }
 
-function saveRecord(){
+async function saveRecord(){
   const name=document.getElementById('f-name').value.trim();
   const ds=document.getElementById('f-dateStart').value;
   if(!name){toast(t('msg.needName'),'err');return}
@@ -732,7 +751,22 @@ function saveRecord(){
     notes:document.getElementById('f-notes').value.trim(),
     sourceId:'',createdAt:new Date().toISOString()};
   const i=DB.findIndex(r=>r.id===rec.id);
-  if(i>=0){rec.sourceId=DB[i].sourceId||'';DB[i]=rec}else DB.push(rec);
+  if(i>=0){
+    rec.sourceId=DB[i].sourceId||'';
+    const old=DB[i];
+    // Only a venue (mode/detail) change can fan out to same-name records.
+    // notes & role stay unique per record — never bulk-applied / no prompt.
+    const venueChanged=old.venueMode!==rec.venueMode
+      ||(old.venueDetail||'')!==(rec.venueDetail||'');
+    const same=DB.filter(r=>r.id!==rec.id&&(r.name||'').trim()===name);
+    if(venueChanged&&same.length){
+      const scope=await askVenueScope(same.length);
+      if(scope==='cancel')return;                 // abort the save entirely
+      DB[i]=rec;
+      if(scope==='all')same.forEach(r=>{
+        r.venueMode=rec.venueMode;r.venueDetail=rec.venueDetail;});
+    }else DB[i]=rec;
+  }else DB.push(rec);
   persist();resetForm();updateCount();renderHero();
   toast(t('msg.saved'),'ok');switchTab('list');
 }
@@ -999,6 +1033,8 @@ function observeReveals(){
 document.querySelectorAll('section .card').forEach(el=>el.classList.add('reveal'));
 document.getElementById('modalBg').addEventListener('click',e=>{
   if(e.target.id==='modalBg')modalResolve(false)});
+document.getElementById('vsBg').addEventListener('click',e=>{
+  if(e.target.id==='vsBg')vsResolve('cancel')});
 applyLang();resetForm();updateCount();renderHero();observeReveals();
 initCloud();refreshAuthGate();
 </script>
