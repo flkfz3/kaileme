@@ -420,6 +420,18 @@
         <div class="field"><label data-i18n="f.repeatUntil"></label>
           <input type="date" id="f-repeatUntil"></div>
       </div>
+      <div class="grid">
+        <div class="field"><label data-i18n="f.startTime"></label>
+          <input type="time" id="f-startTime"></div>
+        <div class="field"><label data-i18n="f.endTime"></label>
+          <input type="time" id="f-endTime"></div>
+      </div>
+      <div class="field"><label data-i18n="f.tz"></label>
+        <select id="f-tz">
+          <option value="America/New_York" data-i18n="tz.et"></option>
+          <option value="America/Los_Angeles" data-i18n="tz.pt"></option>
+          <option value="Asia/Shanghai" data-i18n="tz.ct"></option>
+        </select></div>
       <div class="field"><label data-i18n="f.loc"></label>
         <div class="row">
           <div class="radio">
@@ -586,6 +598,10 @@ const I18N={
   'rep.daily':'Every day','rep.weekly':'Every week','rep.monthly':'Every month',
   'msg.batchAdded':'Added {n} meetings',
   'f.start':'Start date *','f.end':'End date (multi-day, optional)','f.loc':'Location',
+  'f.startTime':'Start time (optional)','f.endTime':'End time (optional)','f.tz':'Timezone',
+  'tz.et':'US East ET','tz.pt':'US West PT','tz.ct':'Beijing CT',
+  'tzs.et':'ET','tzs.pt':'PT','tzs.ct':'Beijing(CT)',
+  'tx.nextDay':'next day','tx.prevDay':'prev day','tx.bj':'Beijing','tx.usEast':'US East',
   online:'Online',offline:'In person','f.role':'My role (conference only)',
   'f.notes':'Notes (talk title / people met / takeaways / TODO)',
   'venueph.on':'Online platform (e.g. Zoom, Teams)','venueph.off':'In-person venue (e.g. San Diego, CA)',
@@ -696,6 +712,10 @@ const I18N={
   'rep.daily':'每天','rep.weekly':'每周','rep.monthly':'每月',
   'msg.batchAdded':'已批量添加 {n} 条会议',
   'f.start':'开始日期 *','f.end':'结束日期（多天会议填，可空）','f.loc':'地点',
+  'f.startTime':'开始时间（可空）','f.endTime':'结束时间（可空）','f.tz':'时区',
+  'tz.et':'美东 ET','tz.pt':'美西 PT','tz.ct':'北京 CT',
+  'tzs.et':'ET','tzs.pt':'PT','tzs.ct':'北京(CT)',
+  'tx.nextDay':'次日','tx.prevDay':'前一天','tx.bj':'北京','tx.usEast':'美东',
   online:'线上',offline:'线下','f.role':'我的角色（仅 conference）',
   'f.notes':'备注（报告题目 / 认识的人 / 心得 / TODO）',
   'venueph.on':'线上平台（如 Zoom、Teams）','venueph.off':'线下地点（如 San Diego, CA）',
@@ -827,10 +847,12 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 function _toRow(r){return{id:r.id,type:r.type||null,name:r.name||null,
   date_start:r.dateStart||null,date_end:r.dateEnd||null,venue_mode:r.venueMode||null,
   venue_detail:r.venueDetail||null,role:r.role||null,notes:r.notes||null,
+  start_time:r.startTime||null,end_time:r.endTime||null,tz:r.tz||null,
   source_id:r.sourceId||null,created_at:r.createdAt||null,edited:!!r.edited}}
 function _fromRow(x){return{id:x.id,type:x.type||'',name:x.name||'',
   dateStart:x.date_start||'',dateEnd:x.date_end||'',venueMode:x.venue_mode||'',
   venueDetail:x.venue_detail||'',role:x.role||'',notes:x.notes||'',
+  startTime:x.start_time||'',endTime:x.end_time||'',tz:x.tz||'',
   sourceId:x.source_id||'',createdAt:x.created_at||'',edited:!!x.edited}}
 function initCloud(){
   if(SET.supaUrl&&SET.supaKey&&window.supabase){
@@ -1096,6 +1118,10 @@ async function saveRecord(){
     role:document.getElementById('f-type').value==='conference'
          ?document.getElementById('f-role').value:'',
     notes:document.getElementById('f-notes').value.trim(),
+    startTime:document.getElementById('f-startTime').value||'',
+    endTime:document.getElementById('f-endTime').value||'',
+    tz:document.getElementById('f-startTime').value
+       ?document.getElementById('f-tz').value:'',
     sourceId:'',createdAt:new Date().toISOString(),edited:true};
   // Recurrence: only when adding a NEW record (not editing). Generates one
   // independent row per occurrence so each can be edited/deleted on its own.
@@ -1130,8 +1156,9 @@ async function saveRecord(){
   toast(t('msg.saved'),'ok');switchTab('list');
 }
 function resetForm(){
-  ['editId','f-name','f-dateStart','f-dateEnd','f-venueDetail','f-role','f-notes','f-repeatUntil']
+  ['editId','f-name','f-dateStart','f-dateEnd','f-venueDetail','f-role','f-notes','f-repeatUntil','f-startTime','f-endTime']
     .forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f-tz').value=defaultTz();
   document.getElementById('f-type').value='组会';
   document.getElementById('f-repeat').value='none';
   document.querySelectorAll('input[name=venue]').forEach(r=>r.checked=false);
@@ -1158,6 +1185,9 @@ function editRecord(id){
   document.getElementById('roleField').classList.toggle('hidden',r.type!=='conference');
   document.getElementById('f-role').value=r.role||'';
   document.getElementById('f-notes').value=r.notes;
+  document.getElementById('f-startTime').value=r.startTime||'';
+  document.getElementById('f-endTime').value=r.endTime||'';
+  document.getElementById('f-tz').value=r.tz||defaultTz();
   if(r.venueMode==='线上')document.getElementById('v-on').checked=true;
   else if(r.venueMode==='线下')document.getElementById('v-off').checked=true;
   document.getElementById('cancelBtn').classList.remove('hidden');
@@ -1194,6 +1224,60 @@ function undoDelete(){
 
 function fmtDate(r){return r.dateEnd&&r.dateEnd!==r.dateStart
   ?r.dateStart+' ~ '+r.dateEnd:r.dateStart}
+// Pick the form's default timezone from the browser; fall back to ET.
+function defaultTz(){
+  const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return['America/New_York','America/Los_Angeles','Asia/Shanghai'].includes(tz)
+    ?tz:'America/New_York';}
+function tzShort(tz){return tz==='America/Los_Angeles'?t('tzs.pt')
+  :tz==='Asia/Shanghai'?t('tzs.ct'):t('tzs.et');}
+// Wall-clock HH:MM in `dst` zone for the instant that is `hm` on `dateISO`
+// in `src` zone. DST-correct via Intl: guess the UTC instant, format it back
+// in the source zone, measure the residual, correct once. Returns {hm,off}
+// where off is the day delta (-1/0/+1) relative to dateISO.
+function tzConvert(dateISO,hm,src,dst){
+  const[Y,M,D]=dateISO.split('-').map(Number);
+  const[h,mi]=hm.split(':').map(Number);
+  const guess=Date.UTC(Y,M-1,D,h,mi);
+  const wall=z=>{
+    const p=new Intl.DateTimeFormat('en-US',{timeZone:z,year:'numeric',
+      month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',
+      hour12:false}).formatToParts(new Date(guess))
+      .reduce((o,x)=>(o[x.type]=x.value,o),{});
+    let hh=p.hour==='24'?'00':p.hour;
+    return{ms:Date.UTC(+p.year,+p.month-1,+p.day,+hh,+p.minute),
+      hm:hh+':'+p.minute,ymd:+p.year*10000+ +p.month*100+ +p.day};};
+  const delta=wall(src).ms-guess;          // src offset at the guessed instant
+  const real=new Date(guess-delta);        // true UTC instant of the meeting
+  const out=new Intl.DateTimeFormat('en-US',{timeZone:dst,year:'numeric',
+    month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',
+    hour12:false}).formatToParts(real)
+    .reduce((o,x)=>(o[x.type]=x.value,o),{});
+  let oh=out.hour==='24'?'00':out.hour;
+  const baseY=Y*10000+M*100+D;
+  const tgtY=(+out.year)*10000+(+out.month)*100+(+out.day);
+  const off=tgtY>baseY?1:tgtY<baseY?-1:0;
+  return{hm:oh+':'+out.minute,off};}
+// Render "HH:MM–HH:MM TZ" plus a muted converted hint to the opposite side
+// of the Pacific. Empty string when the record has no start time.
+function timeLine(r){
+  if(!r||!r.startTime)return'';
+  const tz=r.tz||'America/New_York';
+  const main=r.endTime?r.startTime+'–'+r.endTime:r.startTime;
+  let hint='';
+  const dst=tz==='Asia/Shanghai'?'America/New_York':'Asia/Shanghai';
+  const ds=(r.dateStart||'').slice(0,10);
+  if(ds){
+    try{
+      const a=tzConvert(ds,r.startTime,tz,dst);
+      let conv=a.hm;
+      if(r.endTime)conv+='–'+tzConvert(ds,r.endTime,tz,dst).hm;
+      const lbl=dst==='Asia/Shanghai'?t('tx.bj'):t('tx.usEast');
+      const day=a.off>0?t('tx.nextDay')+' ':a.off<0?t('tx.prevDay')+' ':'';
+      hint=' <span class="meta">('+lbl+' '+day+conv+')</span>';
+    }catch(e){hint='';}
+  }
+  return main+' '+tzShort(tz)+hint;}
 function esc(s){return(s||'').replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function lDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')
@@ -1248,9 +1332,10 @@ function listFiltered(){
 function lrowHtml(r){
   const vp=r.venueMode?`<span class="pill ${r.venueMode==='线上'?'on':'off'}">${r.venueMode==='线上'?t('online'):t('offline')}</span> `:'';
   const prev=esc(r.venueDetail||'');
+  const tl=timeLine(r);
   return `<div class="lrow lcols" role="button" tabindex="0" aria-label="${esc(t('a.openRec'))}"
       onclick="openRec('${r.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openRec('${r.id}')}">
-    <span class="ld">${esc(fmtDate(r))}</span>
+    <span class="ld">${esc(fmtDate(r))}${tl?`<br><span class="meta">${tl}</span>`:''}</span>
     <span class="lty"><span class="pill">${esc(typeLabel(r.type))}</span></span>
     <span class="lnm">${esc(r.name)}</span>
     <span class="lpv">${vp}${prev}</span>
@@ -1339,7 +1424,8 @@ function openRec(id){
   const r=DB.find(x=>x.id===id);if(!r)return;
   _recOpener=document.activeElement;
   const vp=r.venueMode?`<span class="pill ${r.venueMode==='线上'?'on':'off'}">${r.venueMode==='线上'?t('online'):t('offline')}</span> `:'';
-  let bd=`<div class="dr-sec"><div class="k">${t('c.date')}</div><div class="v">${esc(fmtDate(r))}</div></div>
+  const tl=timeLine(r);
+  let bd=`<div class="dr-sec"><div class="k">${t('c.date')}</div><div class="v">${esc(fmtDate(r))}${tl?`<div class="meta" style="margin-top:4px">${tl}</div>`:''}</div></div>
     <div class="dr-sec"><div class="k">${t('d.type')}</div><div class="v">${esc(typeLabel(r.type))}</div></div>
     <div class="dr-sec"><div class="k">${t('d.venue')}</div><div class="v">${vp}${r.venueDetail?linkify(r.venueDetail):'—'}</div></div>`;
   if(r.role)bd+=`<div class="dr-sec"><div class="k">${t('d.role')}</div><div class="v">${esc(r.role)}</div></div>`;
