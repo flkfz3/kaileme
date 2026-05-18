@@ -201,7 +201,9 @@
   .lrow:hover{background:#eef3fc}
   .lrow>span{min-width:0;overflow:hidden;text-overflow:ellipsis;
     white-space:nowrap;display:block}
-  .lrow .ld{color:var(--muted);font-variant-numeric:tabular-nums}
+  .lrow .ld{color:var(--muted);font-variant-numeric:tabular-nums;
+    white-space:normal;overflow:visible;text-overflow:clip}
+  .lrow .ld .meta{white-space:nowrap}
   .lrow .lnm{font-weight:600;color:var(--ink)}
   .lrow .lpv,.lrow .lrl{color:var(--muted)}
   .more-btn{display:block;margin:16px auto 2px;padding:9px 22px}
@@ -1258,26 +1260,29 @@ function tzConvert(dateISO,hm,src,dst){
   const tgtY=(+out.year)*10000+(+out.month)*100+(+out.day);
   const off=tgtY>baseY?1:tgtY<baseY?-1:0;
   return{hm:oh+':'+out.minute,off};}
-// Render "HH:MM–HH:MM TZ" plus a muted converted hint to the opposite side
-// of the Pacific. Empty string when the record has no start time.
+// Time is shown in ONE zone chosen by the UI language: Chinese UI → Beijing,
+// English UI → US Eastern. The stored wall time (r.tz) is converted into that
+// zone. No dual-zone parenthetical: English gets a short "ET" tag, Chinese
+// none (the zh UI carries no English-in-parens). A date shift caused by the
+// conversion is flagged with one word in the UI language. Plain text — the
+// call sites wrap it in their own .meta element.
 function timeLine(r){
   if(!r||!r.startTime)return'';
-  const tz=r.tz||'America/New_York';
-  const main=r.endTime?r.startTime+'–'+r.endTime:r.startTime;
-  let hint='';
-  const dst=tz==='Asia/Shanghai'?'America/New_York':'Asia/Shanghai';
+  const src=r.tz||'America/New_York';
+  const dst=LANG==='zh'?'Asia/Shanghai':'America/New_York';
   const ds=(r.dateStart||'').slice(0,10);
+  let s=r.startTime,e=r.endTime||'',off=0;
   if(ds){
     try{
-      const a=tzConvert(ds,r.startTime,tz,dst);
-      let conv=a.hm;
-      if(r.endTime)conv+='–'+tzConvert(ds,r.endTime,tz,dst).hm;
-      const lbl=dst==='Asia/Shanghai'?t('tx.bj'):t('tx.usEast');
-      const day=a.off>0?t('tx.nextDay')+' ':a.off<0?t('tx.prevDay')+' ':'';
-      hint=' <span class="meta">('+lbl+' '+day+conv+')</span>';
-    }catch(e){hint='';}
+      const a=tzConvert(ds,r.startTime,src,dst);s=a.hm;off=a.off;
+      if(r.endTime)e=tzConvert(ds,r.endTime,src,dst).hm;
+    }catch(_){s=r.startTime;e=r.endTime||'';off=0;}
   }
-  return main+' '+tzShort(tz)+hint;}
+  let out=e?s+'–'+e:s;
+  if(LANG!=='zh')out+=' ET';
+  if(off>0)out+=' '+t('tx.nextDay');
+  else if(off<0)out+=' '+t('tx.prevDay');
+  return out;}
 function esc(s){return(s||'').replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function lDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')
