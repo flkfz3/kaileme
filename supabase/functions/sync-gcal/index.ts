@@ -53,17 +53,21 @@ async function googleAccessToken(): Promise<string> {
   return (await r.json()).access_token as string;
 }
 
-// Calendar descriptions for Zoom/Teams invites are huge boilerplate blobs
-// ("Join Zoom Meeting … One tap mobile … Join by SIP …"). Keep only the
-// human part before the boilerplate; if nothing useful is left, return null.
+// Keep the FULL description — the app shows it complete when a row is
+// expanded (the one-line look is display-only). Only strip HTML tags and
+// trim trailing space / collapse blank-line runs; generous cap to avoid
+// pathological bloat.
 function cleanNotes(desc: string): string | null {
-  let s = (desc || "").replace(/\r/g, "");
-  const cut = s.search(
-    /(Join Zoom Meeting|is inviting you to a|ZoomGov Meeting|Microsoft Teams meeting|One tap mobile|Meeting ID:|Join by SIP|https?:\/\/\S*(zoom|teams|webex|meet\.google)|---)/i,
-  );
-  if (cut >= 0) s = s.slice(0, cut);
-  s = s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  return s ? s.slice(0, 200) : null;
+  const s = (desc || "")
+    .replace(/\r/g, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .trim();
+  return s ? s.slice(0, 4000) : null;
 }
 
 function rowFromEvent(ev: any, owner: string) {
@@ -76,20 +80,45 @@ function rowFromEvent(ev: any, owner: string) {
     d.setDate(d.getDate() - 1); // all-day end is exclusive
     de = d.toISOString().slice(0, 10);
   }
+  // Specific time range (Google-Calendar style). Timed events carry
+  // start/end dateTime like 2026-03-19T10:00:00-04:00 ; all-day events
+  // only have .date and get no time. Store HH:MM in the event's own zone.
+  const sDT = ev?.start?.dateTime || "";
+  const eDT = ev?.end?.dateTime || "";
+  const startTime = sDT ? sDT.slice(11, 16) : null;
+  const endTime = eDT ? eDT.slice(11, 16) : null;
+  const tz = sDT
+    ? (ev?.start?.timeZone || (sDT.match(/(?:[+-]\d{2}:\d{2}|Z)$/)?.[0] ?? null))
+    : null;
   const hay = ((ev.summary || "") + " " + (ev.description || "")).toLowerCase();
+  const ty = mapType(ev.summary || "", hay);
   const loc = (ev.location || "").trim();
-  const online = !loc || /zoom|meet\.google|teams|webex/i.test(loc);
-  // For online events with no location, surface the join URL as the venue
-  // detail so the app can show one clickable link instead of a wall of text.
-  const urlM = (ev.description || "").match(/https?:\/\/[^\s<>"]+/);
-  const venueDetail = loc || (online && urlM ? urlM[0] : null);
+  const desc = ev.description || "";
+  const urlM = desc.match(/https?:\/\/[^\s<>"]+/);
+  let venueMode: string;
+  let venueDetail: string | null;
+  if (loc) {
+    venueMode = /zoom|meet\.google|teams|webex/i.test(loc) ? "线上" : "线下";
+    venueDetail = loc;
+  } else if (urlM && /zoom|meet\.google|teams|webex/i.test(desc)) {
+    venueMode = "线上";
+    venueDetail = urlM[0];
+  } else {
+    // No location & no online link → default by meeting type:
+    // seminars / conferences are in person; meetings & talks default online.
+    venueMode = (ty === "seminar" || ty === "conference") ? "线下" : "线上";
+    venueDetail = null;
+  }
   return {
     id: "gcal:" + ev.id,
-    type: mapType(ev.summary || "", hay),
+    type: ty,
     name: ev.summary || "(no title)",
     date_start: ds || null,
     date_end: de && de !== ds ? de : null,
-    venue_mode: loc ? (online ? "线上" : "线下") : "线上",
+    start_time: startTime,
+    end_time: endTime,
+    tz: tz,
+    venue_mode: venueMode,
     venue_detail: venueDetail,
     role: null,
     notes: cleanNotes(ev.description || ""),
@@ -217,16 +246,25 @@ Deno.serve(async (req: Request) => {
       }
       for (const r of rows.filter((x) => exById.has(x.id))) {
         const ex = exById.get(r.id);
-        if (ex && ex.edited === true) { skipped++; continue; }
+        // Calendar-owned fields (always refreshed from the calendar):
         const patch: Record<string, unknown> = {
           name: r.name,
           date_start: r.date_start,
           date_end: r.date_end,
-          venue_mode: r.venue_mode,
-          venue_detail: r.venue_detail,
-          type: r.type,
+          start_time: r.start_time,
+          end_time: r.end_time,
+          tz: r.tz,
+          notes: r.notes,
         };
-        patch.notes = r.notes; // non-edited row: refresh cleaned notes
+        // User-editable fields: only (re)written for rows the user has NOT
+        // edited in the app, so manual venue/type/role edits are preserved.
+        if (!ex || ex.edited !== true) {
+          patch.venue_mode = r.venue_mode;
+          patch.venue_detail = r.venue_detail;
+          patch.type = r.type;
+        } else {
+          skipped++;
+        }
         const { error } = await sb.from("meetings").update(patch).eq("id", r.id);
         if (!error) updated++;
       }
