@@ -89,32 +89,63 @@ Deno.serve(async () => {
     const kws = env("GCAL_KEYWORDS", "meet,zoom,seminar,conference,talk,colloquium,workshop")
       .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const daysBack = parseInt(env("GCAL_DAYS_BACK", "3650"), 10);
-    const cal = encodeURIComponent(env("GCAL_CALENDAR", "primary"));
+    const calOverride = env("GCAL_CALENDAR", "").trim();
 
     const token = await googleAccessToken();
     const timeMin = new Date(Date.now() - daysBack * 864e5).toISOString();
     const timeMax = new Date(Date.now() + 864e5).toISOString();
 
-    let items: any[] = [];
-    let pageToken = "";
-    do {
-      const u = new URL(
-        `https://www.googleapis.com/calendar/v3/calendars/${cal}/events`,
+    // Enumerate the account's calendars and sync ALL of them (except the
+    // read-only holiday calendars), so an event is picked up no matter which
+    // calendar it lives on. GCAL_CALENDAR, if set, forces a single calendar.
+    let calList: any[] = [];
+    try {
+      const cl = await fetch(
+        "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+        { headers: { Authorization: "Bearer " + token } },
       );
-      u.searchParams.set("timeMin", timeMin);
-      u.searchParams.set("timeMax", timeMax);
-      u.searchParams.set("singleEvents", "true");
-      u.searchParams.set("orderBy", "startTime");
-      u.searchParams.set("maxResults", "250");
-      if (pageToken) u.searchParams.set("pageToken", pageToken);
-      const r = await fetch(u, {
-        headers: { Authorization: "Bearer " + token },
-      });
-      if (!r.ok) throw new Error("calendar list failed: " + (await r.text()));
-      const j = await r.json();
-      items = items.concat(j.items || []);
-      pageToken = j.nextPageToken || "";
-    } while (pageToken && items.length < 5000);
+      if (cl.ok) {
+        calList = ((await cl.json()).items || []).map((c: any) => ({
+          id: c.id, summary: c.summary, primary: !!c.primary,
+        }));
+      }
+    } catch (_) { /* ignore */ }
+
+    const isHoliday = (c: any) =>
+      /holiday/i.test(c.id || "") || /holiday/i.test(c.summary || "");
+    const calIds: string[] = calOverride
+      ? [calOverride]
+      : (calList.length
+        ? calList.filter((c) => !isHoliday(c)).map((c) => c.id)
+        : ["primary"]);
+
+    let items: any[] = [];
+    for (const cid of calIds) {
+      let pageToken = "";
+      do {
+        const u = new URL(
+          `https://www.googleapis.com/calendar/v3/calendars/${
+            encodeURIComponent(cid)
+          }/events`,
+        );
+        u.searchParams.set("timeMin", timeMin);
+        u.searchParams.set("timeMax", timeMax);
+        u.searchParams.set("singleEvents", "true");
+        u.searchParams.set("orderBy", "startTime");
+        u.searchParams.set("maxResults", "250");
+        if (pageToken) u.searchParams.set("pageToken", pageToken);
+        const r = await fetch(u, {
+          headers: { Authorization: "Bearer " + token },
+        });
+        if (!r.ok) {
+          throw new Error("calendar list failed: " + (await r.text()));
+        }
+        const j = await r.json();
+        items = items.concat(j.items || []);
+        pageToken = j.nextPageToken || "";
+      } while (pageToken && items.length < 5000);
+      if (items.length >= 5000) break;
+    }
 
     const rows = items
       .filter((ev) => {
@@ -174,7 +205,14 @@ Deno.serve(async () => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, scanned: items.length, inserted, updated, skipped }),
+      JSON.stringify({
+        ok: true,
+        scanned: items.length,
+        calendars: calIds.length,
+        inserted,
+        updated,
+        skipped,
+      }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (e) {
