@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kai Le Me · meeting log</title>
+<style>
+  :root{
+    --accent:#2563eb; --accent-2:#3b82f6; --accent-soft:#e8effc;
+    --ink:#16161a; --muted:#6b7280; --line:#e8e8ec; --bg:#f6f6f8; --card:#fff;
+    --sh-sm:0 1px 2px rgba(16,16,26,.05);
+    --sh-md:0 4px 14px rgba(16,16,26,.07);
+    --sh-lg:0 12px 34px rgba(16,16,26,.11);
+    --r-s:9px; --r-m:14px; --r-l:20px;
+    --ease:cubic-bezier(.22,.61,.36,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",
+    "PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);
+    line-height:1.55;min-height:100vh;-webkit-font-smoothing:antialiased;
+    background:#0b1437;
+    background-image:
+      radial-gradient(40rem 40rem at 12% 18%,rgba(59,130,246,.55),transparent 60%),
+      radial-gradient(38rem 38rem at 88% 12%,rgba(99,102,241,.50),transparent 60%),
+      radial-gradient(42rem 42rem at 75% 88%,rgba(14,165,233,.45),transparent 62%),
+      radial-gradient(36rem 36rem at 22% 85%,rgba(37,99,235,.50),transparent 60%);
+    background-attachment:fixed;background-size:200% 200%;
+    animation:aurora 26s ease-in-out infinite}
+  @keyframes aurora{0%,100%{background-position:0% 0%}50%{background-position:100% 100%}}
+  .wrap{max-width:1000px;margin:0 auto;padding:26px 22px 60px}
+  .hero{position:relative;overflow:hidden;border-radius:var(--r-l);
+    color:#fff;padding:40px 30px 34px;margin-bottom:24px}
+  .hero::after{content:"";position:absolute;right:-70px;top:-70px;width:240px;
+    height:240px;border-radius:50%;background:rgba(255,255,255,.08)}
+  .hero::before{content:"";position:absolute;right:60px;bottom:-90px;width:170px;
+    height:170px;border-radius:50%;background:rgba(255,255,255,.06)}
+  .hero h1{font-size:30px;letter-spacing:2px;font-weight:800;display:flex;
+    align-items:center;gap:12px}
+  .hero .ic{width:34px;height:34px;display:inline-flex;align-items:center;
+    justify-content:center;background:rgba(255,255,255,.16);border-radius:10px}
+  .hero p{margin-top:7px;opacity:.92;font-size:14px;letter-spacing:.3px}
+  .hero-stats{display:flex;gap:26px;margin-top:22px;flex-wrap:wrap;
+    position:relative;z-index:1}
+  .hs{display:flex;flex-direction:column}
+  .hs .n{font-size:30px;font-weight:800;line-height:1}
+  .hs .l{font-size:12px;opacity:.85;margin-top:5px;letter-spacing:.5px}
+  .hero-tools{position:absolute;top:24px;right:26px;display:flex;gap:8px;z-index:2}
+  .hero-tools button{background:rgba(255,255,255,.15);border:1px solid
+    rgba(255,255,255,.25);color:#fff;font:inherit;font-size:13px;
+    padding:6px 12px;border-radius:8px;cursor:pointer;
+    transition:background .2s var(--ease),transform .15s var(--ease)}
+  .hero-tools button:hover{background:rgba(255,255,255,.28);transform:translateY(-1px)}
+  .lang-btn{font-weight:700}
+  .tabs{display:flex;gap:2px;margin:0 4px 20px;position:relative;flex-wrap:wrap}
+  .tab{padding:11px 20px;border:none;background:none;color:rgba(255,255,255,.72);
+    font:inherit;font-size:15px;cursor:pointer;border-radius:10px 10px 0 0;
+    position:relative;transition:color .22s var(--ease)}
+  .tab:hover{color:#fff}
+  .tab.active{color:#fff;font-weight:650}
+  .tab::after{content:"";position:absolute;left:14px;right:14px;bottom:0;
+    height:3px;border-radius:3px;background:#fff;transform:scaleX(0);
+    transform-origin:center;transition:transform .28s var(--ease)}
+  .tab.active::after{transform:scaleX(1)}
+  .tabs-line{height:1px;background:rgba(255,255,255,.25);margin:-22px 0 22px;border-radius:2px}
+  section{animation:rise .42s var(--ease)}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .reveal{opacity:0;transform:translateY(48px) scale(.965);
+    will-change:transform,opacity;
+    transition:opacity .8s var(--ease),transform .8s var(--ease)}
+  .reveal.in{opacity:1;transform:none}
+  .card{background:rgba(255,255,255,.82);
+    -webkit-backdrop-filter:blur(18px) saturate(150%);
+    backdrop-filter:blur(18px) saturate(150%);
+    border:1px solid rgba(255,255,255,.6);
+    border-radius:var(--r-m);padding:24px;margin-bottom:18px;
+    box-shadow:0 10px 34px rgba(7,18,55,.28);
+    transition:transform .3s var(--ease),box-shadow .3s var(--ease)}
+  .card:hover{transform:translateY(-3px);box-shadow:0 18px 46px rgba(7,18,55,.34)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px;
+    font-weight:550;letter-spacing:.2px}
+  input,select,textarea{font:inherit;width:100%;padding:11px 13px;
+    border:1.5px solid var(--line);border-radius:var(--r-s);background:#fff;
+    color:var(--ink);transition:border-color .2s var(--ease),box-shadow .2s var(--ease)}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
+    box-shadow:0 0 0 4px var(--accent-soft)}
+  textarea{resize:vertical;min-height:66px}
+  .field{margin-bottom:16px}
+  .row{display:flex;gap:18px;align-items:center}
+  .radio{display:flex;gap:18px;align-items:center}
+  .radio span{display:flex;align-items:center;gap:6px;font-size:14px;
+    color:var(--ink);cursor:pointer}
+  .radio input{width:auto}
+  .hidden{display:none!important}
+  .formfoot{display:flex;gap:10px;margin-top:8px}
+  button,.btn{font:inherit;cursor:pointer;border:1.5px solid var(--line);
+    background:var(--card);color:var(--ink);padding:9px 16px;border-radius:var(--r-s);
+    font-weight:550;transition:border-color .2s var(--ease),color .2s var(--ease),
+    background .2s var(--ease),transform .14s var(--ease),box-shadow .2s var(--ease)}
+  button:hover{border-color:var(--accent);color:var(--accent);
+    transform:translateY(-1px);box-shadow:var(--sh-sm)}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.primary:hover{background:var(--accent-2);color:#fff;
+    box-shadow:0 6px 18px rgba(37,99,235,.32)}
+  button.danger{color:#b00020;border-color:#f0c4c9}
+  button.danger:hover{background:#fff0f1;color:#b00020;border-color:#e89aa3}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none;
+    border-color:var(--line);color:var(--ink)}
+  .rowbtn{font-size:12.5px;padding:5px 11px}
+  .filters{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;align-items:end}
+  .filters .field{margin:0;min-width:150px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);
+    vertical-align:top}
+  th{font-size:11.5px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.7px;font-weight:600}
+  tbody tr{transition:background .16s var(--ease)}
+  tbody tr:hover td{background:#eef3fc}
+  .pill{display:inline-block;font-size:12px;padding:3px 11px;border-radius:20px;
+    background:var(--accent-soft);color:var(--accent);white-space:nowrap;font-weight:600}
+  .pill.on{background:#e7f0fb;color:#1c5d9e}
+  .pill.off{background:#eaf3e6;color:#476b32}
+  .meta{color:var(--muted);font-size:12px}
+  .empty{text-align:center;color:var(--muted);padding:50px 20px}
+  .empty .big{font-size:40px;margin-bottom:10px;opacity:.5}
+  .stats-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
+  .stat{background:rgba(255,255,255,.82);
+    -webkit-backdrop-filter:blur(18px) saturate(150%);
+    backdrop-filter:blur(18px) saturate(150%);
+    border:1px solid rgba(255,255,255,.6);border-radius:var(--r-m);
+    padding:20px 18px;box-shadow:0 10px 30px rgba(7,18,55,.26);
+    transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
+  .stat:hover{transform:translateY(-4px);box-shadow:0 18px 44px rgba(7,18,55,.32)}
+  .stat .n{font-size:34px;color:var(--accent);font-weight:800;line-height:1}
+  .stat .l{font-size:12.5px;color:var(--muted);margin-top:7px;font-weight:550}
+  .chart-title{font-size:14.5px;font-weight:700;margin-bottom:18px}
+  .bar-row{display:flex;align-items:center;gap:12px;margin-bottom:10px;font-size:13px}
+  .bar-row .lab{width:140px;text-align:right;color:var(--muted);flex-shrink:0}
+  .bar-track{flex:1;background:#eef0f3;border-radius:6px;height:22px;overflow:hidden}
+  .bar-fill{background:linear-gradient(90deg,var(--accent),var(--accent-2));
+    height:100%;border-radius:6px;width:0;transition:width .7s var(--ease)}
+  .bar-row .val{width:36px;text-align:left;color:var(--ink);flex-shrink:0;font-weight:650}
+  .month-chart{display:flex;align-items:flex-end;gap:8px;height:172px;
+    padding:12px 0;border-bottom:1px solid var(--line)}
+  .mbar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;
+    height:100%;justify-content:flex-end}
+  .mbar .fill{width:64%;background:linear-gradient(180deg,var(--accent-2),
+    var(--accent));border-radius:5px 5px 0 0;height:0;transition:height .65s var(--ease)}
+  .mbar:hover .fill{filter:brightness(1.12)}
+  .mbar .mn{font-size:11px;color:var(--muted)}
+  .mbar .mv{font-size:11px;color:var(--ink);font-weight:650;height:14px}
+  .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
+  .banner{font-size:13px;padding:12px 15px;border-radius:10px;margin-bottom:16px;line-height:1.6}
+  .banner.warn{background:#fff7e8;border:1px solid #f0dba8;color:#7a5b16}
+  .banner.ok{background:#eaf6ea;border:1px solid #b7dcb9;color:#2e7d32}
+  .imp-item{display:flex;gap:11px;align-items:flex-start;padding:11px 12px;
+    border-bottom:1px solid var(--line);font-size:14px;border-radius:8px;
+    transition:background .15s var(--ease)}
+  .imp-item:hover{background:#fafafa}
+  .imp-item input{width:auto;margin-top:3px}
+  code{background:#efeef1;padding:2px 6px;border-radius:5px;font-size:12.5px}
+  .map-row{margin-bottom:9px}
+  #toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%) translateY(20px);
+    background:var(--ink);color:#fff;padding:13px 22px;border-radius:11px;font-size:14px;
+    box-shadow:var(--sh-lg);opacity:0;pointer-events:none;
+    transition:opacity .3s var(--ease),transform .3s var(--ease);z-index:90;max-width:88vw}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast.ok{background:#1f7a3a}#toast.err{background:#9c2230}
+  .modal-bg{position:fixed;inset:0;background:rgba(16,16,26,.45);display:flex;
+    align-items:center;justify-content:center;z-index:100;opacity:0;
+    pointer-events:none;transition:opacity .25s var(--ease)}
+  .modal-bg.show{opacity:1;pointer-events:auto}
+  .modal{background:#fff;border-radius:var(--r-m);padding:24px;max-width:380px;
+    width:90%;box-shadow:var(--sh-lg);transform:scale(.94);
+    transition:transform .25s var(--ease)}
+  .modal-bg.show .modal{transform:scale(1)}
+  .modal p{font-size:15px;margin-bottom:20px}
+  .modal .mf{display:flex;gap:10px;justify-content:flex-end}
+  @media(max-width:680px){.grid,.stats-cards{grid-template-columns:1fr}
+    .bar-row .lab{width:96px}.hero-tools{position:static;margin-top:14px}
+    .hero{padding:22px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="hero-tools">
+      <button class="lang-btn" id="langBtn" onclick="toggleLang()">中</button>
+      <button data-i18n="exportBackup" onclick="exportJSON()"></button>
+      <button data-i18n="importBackup" onclick="document.getElementById('importFile').click()"></button>
+      <input type="file" id="importFile" accept="application/json" class="hidden" onchange="importJSON(event)">
+    </div>
+    <h1><span class="ic">🗓️</span><span data-i18n="brand"></span></h1>
+    <p data-i18n="tagline"></p>
+    <div class="hero-stats" id="heroStats"></div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="add" data-i18n="tab.add" onclick="switchTab('add')"></button>
+    <button class="tab" data-tab="list" onclick="switchTab('list')"><span data-i18n="tab.list"></span> <span id="cnt"></span></button>
+    <button class="tab" data-tab="stat" data-i18n="tab.stat" onclick="switchTab('stat')"></button>
+    <button class="tab" data-tab="cal" data-i18n="tab.cal" onclick="switchTab('cal')"></button>
+    <button class="tab" data-tab="set" data-i18n="tab.set" onclick="switchTab('set')"></button>
+  </div>
+  <div class="tabs-line"></div>
+
+  <section id="tab-add">
+    <div class="card">
+      <input type="hidden" id="editId">
+      <div class="grid">
+        <div class="field"><label data-i18n="f.type"></label>
+          <select id="f-type" onchange="applyTypeDefault()">
+            <option value="组会" data-i18n="ty.组会"></option>
+            <option value="组内报告" data-i18n="ty.组内报告"></option>
+            <option value="seminar" data-i18n="ty.seminar"></option>
+            <option value="conference" data-i18n="ty.conference"></option>
+            <option value="其他" data-i18n="ty.其他"></option>
+          </select></div>
+        <div class="field"><label data-i18n="f.name"></label>
+          <input id="f-name" data-ph="f.nameph"></div>
+      </div>
+      <div class="grid">
+        <div class="field"><label data-i18n="f.start"></label>
+          <input type="date" id="f-dateStart"></div>
+        <div class="field"><label data-i18n="f.end"></label>
+          <input type="date" id="f-dateEnd"></div>
+      </div>
+      <div class="field"><label data-i18n="f.loc"></label>
+        <div class="row">
+          <div class="radio">
+            <span><input type="radio" name="venue" value="线上" id="v-on" onchange="toggleVenue()"><span data-i18n="online"></span></span>
+            <span><input type="radio" name="venue" value="线下" id="v-off" onchange="toggleVenue()"><span data-i18n="offline"></span></span>
+          </div>
+          <input id="f-venueDetail" style="flex:1">
+        </div>
+      </div>
+      <div class="field hidden" id="roleField"><label data-i18n="f.role"></label>
+        <select id="f-role">
+          <option value="" data-i18n="ro.none"></option>
+          <option value="oral" data-i18n="ro.oral"></option>
+          <option value="poster" data-i18n="ro.poster"></option>
+          <option value="attendee" data-i18n="ro.attendee"></option>
+          <option value="chair" data-i18n="ro.chair"></option>
+          <option value="其他" data-i18n="ro.其他"></option>
+        </select></div>
+      <div class="field"><label data-i18n="f.notes"></label>
+        <textarea id="f-notes"></textarea></div>
+      <div class="formfoot">
+        <button class="primary" data-i18n="save" onclick="saveRecord()"></button>
+        <button onclick="resetForm()" id="cancelBtn" class="hidden" data-i18n="cancelEdit"></button>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-list" class="hidden">
+    <div class="card">
+      <div class="filters">
+        <div class="field"><label data-i18n="l.year"></label>
+          <select id="flt-year" onchange="renderList()"></select></div>
+        <div class="field"><label data-i18n="l.type"></label>
+          <select id="flt-type" onchange="renderList()">
+            <option value="" data-i18n="all"></option>
+            <option value="组会" data-i18n="ty.组会"></option>
+            <option value="组内报告" data-i18n="ty.组内报告"></option>
+            <option value="seminar" data-i18n="ty.seminar"></option>
+            <option value="conference" data-i18n="ty.conference"></option>
+            <option value="其他" data-i18n="ty.其他"></option>
+          </select></div>
+        <div class="field" style="flex:1;min-width:190px"><label data-i18n="l.search"></label>
+          <input id="flt-q" oninput="renderList()" data-ph="l.searchph"></div>
+      </div>
+      <div id="listBox"></div>
+    </div>
+  </section>
+
+  <section id="tab-stat" class="hidden">
+    <div class="stats-cards" id="statCards"></div>
+    <div class="card"><div class="chart-title" id="monthTitle"></div>
+      <div class="month-chart" id="monthChart"></div></div>
+    <div class="grid">
+      <div class="card"><div class="chart-title" data-i18n="byType"></div><div id="byType"></div></div>
+      <div class="card"><div class="chart-title" data-i18n="byRole"></div><div id="byRole"></div></div>
+    </div>
+  </section>
+
+  <section id="tab-cal" class="hidden">
+    <div class="card">
+      <div id="calBanner"></div>
+      <div class="row" style="flex-wrap:wrap;gap:12px">
+        <button class="primary" id="connBtn" data-i18n="connect" onclick="gAuth()"></button>
+        <button id="signoutBtn" class="hidden" data-i18n="disconnect" onclick="gSignout()"></button>
+        <div class="field" style="margin:0"><label data-i18n="range"></label>
+          <select id="cal-range">
+            <option value="180" data-i18n="r.180"></option>
+            <option value="365" selected data-i18n="r.365"></option>
+            <option value="730" data-i18n="r.730"></option>
+            <option value="0" data-i18n="r.ytd"></option>
+          </select></div>
+        <button id="pullBtn" class="hidden" data-i18n="pull" onclick="gPull()"></button>
+      </div>
+      <div class="note" data-i18n="calNote"></div>
+    </div>
+    <div class="card hidden" id="impCard">
+      <div class="chart-title" id="impHead"></div>
+      <div id="impBox"></div>
+      <div class="formfoot">
+        <button class="primary" data-i18n="importSel" onclick="confirmImport()"></button>
+        <button data-i18n="selAll" onclick="document.querySelectorAll('.imp-cb').forEach(c=>c.checked=true)"></button>
+        <button data-i18n="selNone" onclick="document.querySelectorAll('.imp-cb').forEach(c=>c.checked=false)"></button>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-set" class="hidden">
+    <div class="card">
+      <div class="chart-title" data-i18n="s.cloud"></div>
+      <div class="note" style="margin-top:0;margin-bottom:12px" data-i18n="s.cloudNote"></div>
+      <div class="field"><label data-i18n="s.supaUrl"></label>
+        <input id="set-supaUrl" placeholder="https://xxxx.supabase.co"></div>
+      <div class="field"><label data-i18n="s.supaKey"></label>
+        <input id="set-supaKey" placeholder="eyJhbGci... (anon public key)"></div>
+      <button class="rowbtn" style="margin-bottom:20px" data-i18n="migrate" onclick="migrateUp()"></button>
+      <div class="chart-title" data-i18n="s.title"></div>
+      <div class="field"><label data-i18n="s.client"></label>
+        <input id="set-clientId" placeholder="xxxx.apps.googleusercontent.com"></div>
+      <div class="field"><label data-i18n="s.kw"></label>
+        <input id="set-keywords" data-ph="s.kwph"></div>
+      <div class="chart-title" style="margin-top:20px" data-i18n="s.mapTitle"></div>
+      <div class="note" style="margin-top:0;margin-bottom:12px" data-i18n="s.mapNote"></div>
+      <div id="mapBox"></div>
+      <button class="rowbtn" style="margin-top:10px" data-i18n="addRow" onclick="addMapRow()"></button>
+      <div class="formfoot" style="margin-top:20px">
+        <button class="primary" data-i18n="saveSet" onclick="saveSettings()"></button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="toast"></div>
+<div class="modal-bg" id="modalBg">
+  <div class="modal"><p id="modalMsg"></p>
+    <div class="mf">
+      <button data-i18n="cancel" onclick="modalResolve(false)"></button>
+      <button class="primary" data-i18n="ok" onclick="modalResolve(true)"></button>
+    </div>
+  </div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
+let sb=null, cloud=false;
+let DB=load(), SET=loadSettings();
+let LANG=localStorage.getItem(LKEY)||'en';
+let tokenClient=null, accessToken=null, lastPulled=[], _modalCb=null;
+
+const I18N={
+ en:{
+  brand:'Met yet?',
+  exportBackup:'Export backup', importBackup:'Import backup',
+  tagline:'Track every meeting and talk I attend',
+  'tab.add':'Add','tab.list':'List','tab.stat':'Stats','tab.cal':'Google Calendar','tab.set':'Settings',
+  'st.total':'Total','st.conf':'Conferences','st.talks':'Talks given','st.year':'{y}',
+  'f.type':'Meeting type *','f.name':'Meeting name *','f.nameph':'e.g. NeurIPS 2026 / group meeting',
+  'f.start':'Start date *','f.end':'End date (multi-day, optional)','f.loc':'Location',
+  online:'Online',offline:'In person','f.role':'My role (conference only)',
+  'f.notes':'Notes (talk title / people met / takeaways / TODO)',
+  'venueph.on':'Online platform (e.g. Zoom, Teams)','venueph.off':'In-person venue (e.g. San Diego, CA)',
+  save:'Save',cancelEdit:'Cancel edit',
+  's.cloud':'Cloud sync (Supabase)',
+  's.cloudNote':'Free cloud database — any device that opens this page stays in sync automatically. One-time setup (~5 min) in SUPABASE_SETUP.md.',
+  's.supaUrl':'Supabase Project URL','s.supaKey':'Supabase anon public key',
+  migrate:'⬆ Upload local data to cloud',
+  'msg.cloudErr':'Cloud sync error — check Supabase URL / key',
+  'msg.needCloud':'Configure Supabase first (Settings tab)',
+  'msg.migrated':'Uploaded {n} records to cloud',
+  'ask.migrate':'Upload {n} local records to the cloud database?',
+  'ty.组会':'Lab meeting','ty.组内报告':'Lab talk','ty.seminar':'Seminar',
+  'ty.conference':'Conference','ty.其他':'Other',
+  'ro.none':'—','ro.oral':'Oral','ro.poster':'Poster','ro.attendee':'Attendee',
+  'ro.chair':'Chair','ro.其他':'Other',
+  'l.year':'Year','l.type':'Type','l.search':'Search (name/notes)','l.searchph':'keyword',
+  all:'All','c.date':'Date','c.type':'Type','c.name':'Name','c.loc':'Location',
+  'c.role':'Role','c.notes':'Notes',edit:'Edit',del:'Del',
+  'l.empty':'No records yet — add one in the "Add" tab',fromCal:'·calendar',
+  monthly:'Monthly distribution','monthly.y':'Monthly distribution · {y}',
+  byType:'By type',byRole:'Roles within conferences',nodata:'No data',
+  connect:'Connect Google Calendar',disconnect:'Disconnect',range:'Time range',
+  'r.180':'Last 180 days','r.365':'Last 1 year','r.730':'Last 2 years','r.ytd':'Since Jan 1 this year',
+  pull:'Pull & filter',
+  calNote:'Read-only (calendar.readonly) — your events are never modified. Matching events are listed below; they are written only after you confirm. Already-imported events are deduped by Google event ID.',
+  candidates:'Candidate events',importSel:'Import selected',selAll:'Select all',selNone:'Clear',
+  'b.noClient':'No OAuth Client ID yet. Fill it in the Settings tab (see SETUP.md).',
+  'b.local':'Opened locally as <code>file://</code>. Google login only works on an <code>https</code> domain (e.g. GitHub Pages). Everything else works locally.',
+  'b.ready':'Configured. Click "Connect Google Calendar" to authorize (read-only).',
+  'b.connected':'Connected. You can now "Pull & filter".',
+  'imp.head':'Candidates: {n} matched ({d} already imported, unchecked by default)',
+  'imp.none':'No events matched the keywords',
+  's.title':'Google Calendar integration settings','s.client':'OAuth Client ID (see SETUP.md)',
+  's.kw':'Keywords (match title/description, comma-separated)',
+  's.kwph':'meeting,seminar,conference,talk,workshop',
+  's.mapTitle':'Keyword → meeting-type mapping',
+  's.mapNote':'Events matching the left keyword get the right type; unmatched → Other.',
+  addRow:'+ Add row',saveSet:'Save settings','kw.ph':'keyword',
+  cancel:'Cancel',ok:'OK',
+  'msg.needName':'Please enter a meeting name','msg.needDate':'Please enter a start date',
+  'msg.saved':'Saved','msg.deleted':'Deleted','msg.setSaved':'Settings saved',
+  'msg.exported':'Backup exported','msg.imported':'Imported','msg.badFile':'Invalid file format',
+  'msg.importedN':'Imported {n}','msg.authed':'Authorized — click "Pull & filter"',
+  'msg.authFail':'Authorization failed or cancelled','msg.connectFirst':'Connect first',
+  'msg.pullFail':'Pull failed {s} — reconnect','msg.netErr':'Network error: {m}',
+  'msg.noSel':'Nothing selected','msg.disconnected':'Disconnected',
+  'msg.gLib':'Google library not ready (needs internet), try again shortly',
+  'msg.needClient':'Fill the Client ID in Settings first',
+  'ask.del':'Delete this record?','ask.import':'Import {n}, overwrite current {m}?',
+  'dn.组会':'Lab meeting','dn.组内报告':'Lab talk'
+ },
+ zh:{
+  brand:'开了么',
+  exportBackup:'导出备份', importBackup:'导入备份',
+  tagline:'记录我参加的每一场会议与报告',
+  'tab.add':'记录','tab.list':'列表','tab.stat':'统计','tab.cal':'Google 日历','tab.set':'设置',
+  'st.total':'总记录','st.conf':'conference','st.talks':'做过 talk/poster','st.year':'{y} 年',
+  'f.type':'会议类型 *','f.name':'会议名称 *','f.nameph':'如 NeurIPS 2026 / 课题组周会',
+  'f.start':'开始日期 *','f.end':'结束日期（多天会议填，可空）','f.loc':'地点',
+  online:'线上',offline:'线下','f.role':'我的角色（仅 conference）',
+  'f.notes':'备注（报告题目 / 认识的人 / 心得 / TODO）',
+  'venueph.on':'线上平台（如 Zoom、Teams）','venueph.off':'线下地点（如 San Diego, CA）',
+  save:'保存',cancelEdit:'取消编辑',
+  's.cloud':'云同步（Supabase）',
+  's.cloudNote':'免费云数据库——任何设备打开此页都自动同步。一次性配置（约 5 分钟）见 SUPABASE_SETUP.md。',
+  's.supaUrl':'Supabase Project URL','s.supaKey':'Supabase anon public key',
+  migrate:'⬆ 本地数据上传到云',
+  'msg.cloudErr':'云同步出错——检查 Supabase URL / key',
+  'msg.needCloud':'先在设置里配置 Supabase',
+  'msg.migrated':'已上传 {n} 条到云',
+  'ask.migrate':'把 {n} 条本地记录上传到云数据库？',
+  'ty.组会':'组会 (lab meeting)','ty.组内报告':'组内报告 (lab talk)','ty.seminar':'seminar',
+  'ty.conference':'conference','ty.其他':'其他',
+  'ro.none':'—','ro.oral':'oral（口头报告）','ro.poster':'poster（海报）',
+  'ro.attendee':'attendee（仅参会）','ro.chair':'chair（主持/分会主席）','ro.其他':'其他',
+  'l.year':'年份','l.type':'类型','l.search':'搜索（名称/备注）','l.searchph':'关键词',
+  all:'全部','c.date':'日期','c.type':'类型','c.name':'名称','c.loc':'地点',
+  'c.role':'角色','c.notes':'备注',edit:'编辑',del:'删',
+  'l.empty':'还没有记录，去「记录」加一条吧',fromCal:'·日历',
+  monthly:'月度分布','monthly.y':'{y} 年月度分布',
+  byType:'按类型',byRole:'conference 里的角色',nodata:'无数据',
+  connect:'连接 Google 日历',disconnect:'断开',range:'时间范围',
+  'r.180':'最近 180 天','r.365':'最近 1 年','r.730':'最近 2 年','r.ytd':'今年 1 月 1 日起',
+  pull:'拉取并筛选',
+  calNote:'只读取日历（calendar.readonly），不会改你的日程。命中关键词的日程列在下面，勾选确认后才写入；已导入过的按 Google 事件 ID 自动去重。',
+  candidates:'候选日程',importSel:'导入勾选项',selAll:'全选',selNone:'全不选',
+  'b.noClient':'还没填 OAuth Client ID。去「设置」填写（步骤见 SETUP.md）。',
+  'b.local':'当前是本地 <code>file://</code> 打开，Google 登录只在 <code>https</code> 域名可用（如 GitHub Pages）。其余功能本地可用。',
+  'b.ready':'已配置，点「连接 Google 日历」授权（只读）。',
+  'b.connected':'已连接 Google 日历，可以「拉取并筛选」。',
+  'imp.head':'候选日程：命中 {n} 条（{d} 条已导入过，默认不勾）',
+  'imp.none':'没有命中关键词的日程',
+  's.title':'Google 日历接入设置','s.client':'OAuth Client ID（见 SETUP.md）',
+  's.kw':'关键词（命中标题/描述任一即视为会议，英文逗号分隔）',
+  's.kwph':'meeting,seminar,conference,talk,workshop',
+  's.mapTitle':'关键词 → 会议类型映射',
+  's.mapNote':'命中左边关键词的日程，导入时类型设右边；没命中归「其他」。',
+  addRow:'+ 加一行',saveSet:'保存设置','kw.ph':'关键词',
+  cancel:'取消',ok:'确定',
+  'msg.needName':'请填会议名称','msg.needDate':'请填开始日期',
+  'msg.saved':'已保存','msg.deleted':'已删除','msg.setSaved':'设置已保存',
+  'msg.exported':'已导出备份','msg.imported':'已导入','msg.badFile':'文件格式不对',
+  'msg.importedN':'导入 {n} 条','msg.authed':'已授权，点「拉取并筛选」',
+  'msg.authFail':'授权失败或被取消','msg.connectFirst':'先连接',
+  'msg.pullFail':'拉取失败 {s}，重新连接','msg.netErr':'网络错误：{m}',
+  'msg.noSel':'没勾选任何项','msg.disconnected':'已断开',
+  'msg.gLib':'Google 库还没加载好（需联网），稍等再试',
+  'msg.needClient':'先在设置里填 Client ID',
+  'ask.del':'删除这条记录？','ask.import':'导入 {n} 条，覆盖当前 {m} 条？',
+  'dn.组会':'组会','dn.组内报告':'组内报告'
+ }
+};
+function t(k,v){
+  let s=(I18N[LANG]&&I18N[LANG][k])||(I18N.en[k])||k;
+  if(v)for(const p in v)s=s.replace('{'+p+'}',v[p]);
+  return s;
+}
+function typeLabel(tp){return t('ty.'+tp)}
+function applyLang(){
+  document.documentElement.lang=LANG==='zh'?'zh':'en';
+  document.getElementById('langBtn').textContent=LANG==='en'?'中':'EN';
+  document.title=t('brand')+(LANG==='zh'?' · 会议记录':' · meeting log');
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    el.textContent=t(el.getAttribute('data-i18n'));});
+  document.querySelectorAll('[data-ph]').forEach(el=>{
+    el.placeholder=t(el.getAttribute('data-ph'));});
+  toggleVenue();
+  updateCount();renderHero();
+  const cur=document.querySelector('.tab.active');
+  if(cur)switchTab(cur.dataset.tab);
+}
+function toggleLang(){
+  LANG=LANG==='en'?'zh':'en';localStorage.setItem(LKEY,LANG);applyLang();
+}
+
+function load(){try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}}
+function persist(){localStorage.setItem(KEY,JSON.stringify(DB));if(cloud)pushCloud();}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function _toRow(r){return{id:r.id,type:r.type||null,name:r.name||null,
+  date_start:r.dateStart||null,date_end:r.dateEnd||null,venue_mode:r.venueMode||null,
+  venue_detail:r.venueDetail||null,role:r.role||null,notes:r.notes||null,
+  source_id:r.sourceId||null,created_at:r.createdAt||null}}
+function _fromRow(x){return{id:x.id,type:x.type||'',name:x.name||'',
+  dateStart:x.date_start||'',dateEnd:x.date_end||'',venueMode:x.venue_mode||'',
+  venueDetail:x.venue_detail||'',role:x.role||'',notes:x.notes||'',
+  sourceId:x.source_id||'',createdAt:x.created_at||''}}
+function initCloud(){
+  if(SET.supaUrl&&SET.supaKey&&window.supabase){
+    try{sb=window.supabase.createClient(SET.supaUrl,SET.supaKey);cloud=true}
+    catch(e){sb=null;cloud=false}
+  }else{sb=null;cloud=false}
+}
+let _pushing=false,_pushAgain=false;
+async function pushCloud(){
+  if(!cloud)return;
+  if(_pushing){_pushAgain=true;return}
+  _pushing=true;
+  try{
+    const {data}=await sb.from('meetings').select('id');
+    const local=new Set(DB.map(r=>r.id));
+    const del=(data||[]).map(r=>r.id).filter(id=>!local.has(id));
+    if(del.length)await sb.from('meetings').delete().in('id',del);
+    if(DB.length)await sb.from('meetings').upsert(DB.map(_toRow));
+  }catch(e){console.warn('pushCloud',e)}
+  _pushing=false;
+  if(_pushAgain){_pushAgain=false;pushCloud()}
+}
+async function pullCloud(){
+  if(!cloud)return;
+  try{
+    const {data,error}=await sb.from('meetings').select('*');
+    if(error)throw error;
+    DB=(data||[]).map(_fromRow);
+    localStorage.setItem(KEY,JSON.stringify(DB));
+    updateCount();renderHero();
+    const cur=document.querySelector('.tab.active');if(cur)switchTab(cur.dataset.tab);
+  }catch(e){toast(t('msg.cloudErr'),'err')}
+}
+async function migrateUp(){
+  if(!cloud){toast(t('msg.needCloud'),'err');return}
+  if(!await ask(t('ask.migrate',{n:DB.length})))return;
+  await pushCloud();toast(t('msg.migrated',{n:DB.length}),'ok');
+}
+
+let _tT;
+function toast(msg,kind){
+  const t2=document.getElementById('toast');
+  t2.textContent=msg;t2.className='show'+(kind?' '+kind:'');
+  clearTimeout(_tT);_tT=setTimeout(()=>t2.className=t2.className.replace('show','').trim(),2600);
+}
+function ask(msg){return new Promise(res=>{_modalCb=res;
+  document.getElementById('modalMsg').textContent=msg;
+  document.getElementById('modalBg').classList.add('show');});}
+function modalResolve(v){document.getElementById('modalBg').classList.remove('show');
+  if(_modalCb){_modalCb(v);_modalCb=null}}
+
+function defaultSettings(){return{clientId:'',supaUrl:'',supaKey:'',
+  keywords:['meeting','seminar','conference','talk','workshop'],
+  map:[['seminar','seminar'],['conference','conference'],['talk','组内报告'],
+       ['lab meeting','组会'],['group meeting','组会']]}}
+function loadSettings(){try{const s=JSON.parse(localStorage.getItem(SKEY));
+  return s&&s.keywords?s:defaultSettings()}catch(e){return defaultSettings()}}
+function saveSettings(){
+  SET.clientId=document.getElementById('set-clientId').value.trim();
+  SET.supaUrl=document.getElementById('set-supaUrl').value.trim();
+  SET.supaKey=document.getElementById('set-supaKey').value.trim();
+  SET.keywords=document.getElementById('set-keywords').value
+    .split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+  SET.map=[...document.querySelectorAll('.map-row')].map(r=>[
+    r.querySelector('.map-k').value.trim().toLowerCase(),
+    r.querySelector('.map-t').value]).filter(p=>p[0]);
+  localStorage.setItem(SKEY,JSON.stringify(SET));
+  tokenClient=null;initCloud();toast(t('msg.setSaved'),'ok');
+  if(cloud)pullCloud();
+}
+
+const TYPE_DEFAULT={
+  '组会':{venue:'线上',detail:'Zoom',name:'dn.组会'},
+  '组内报告':{venue:'线上',detail:'Zoom',name:'dn.组内报告'},
+  'seminar':{venue:'线下',detail:'Caldwell Hall, UGA',name:''},
+  'conference':{venue:'线下',detail:'',name:''},
+  '其他':null
+};
+const TYPES=['组会','组内报告','seminar','conference','其他'];
+
+function applyTypeDefault(){
+  const tp=document.getElementById('f-type').value;
+  document.getElementById('roleField').classList.toggle('hidden',tp!=='conference');
+  const d=TYPE_DEFAULT[tp];
+  if(d){
+    document.getElementById(d.venue==='线上'?'v-on':'v-off').checked=true;
+    if(!document.getElementById('f-venueDetail').value)
+      document.getElementById('f-venueDetail').value=d.detail;
+    const nm=document.getElementById('f-name');
+    if(!nm.value&&d.name)nm.value=t(d.name);
+    toggleVenue();
+  }
+}
+function toggleVenue(){
+  const on=document.getElementById('v-on').checked;
+  document.getElementById('f-venueDetail').placeholder=t(on?'venueph.on':'venueph.off');
+}
+
+function switchTab(tp){
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===tp));
+  ['add','list','stat','cal','set'].forEach(x=>{
+    const el=document.getElementById('tab-'+x);
+    if(x===tp){el.classList.remove('hidden');
+      el.style.animation='none';el.offsetHeight;el.style.animation='';}
+    else el.classList.add('hidden');});
+  if(tp==='list')renderList();
+  if(tp==='stat')renderStat();
+  if(tp==='cal')renderCalBanner();
+  if(tp==='set')renderSettings();
+  observeReveals();
+}
+
+function saveRecord(){
+  const name=document.getElementById('f-name').value.trim();
+  const ds=document.getElementById('f-dateStart').value;
+  if(!name){toast(t('msg.needName'),'err');return}
+  if(!ds){toast(t('msg.needDate'),'err');return}
+  const rec={id:document.getElementById('editId').value||uid(),
+    type:document.getElementById('f-type').value,name,dateStart:ds,
+    dateEnd:document.getElementById('f-dateEnd').value||'',
+    venueMode:document.getElementById('v-on').checked?'线上':
+              document.getElementById('v-off').checked?'线下':'',
+    venueDetail:document.getElementById('f-venueDetail').value.trim(),
+    role:document.getElementById('f-type').value==='conference'
+         ?document.getElementById('f-role').value:'',
+    notes:document.getElementById('f-notes').value.trim(),
+    sourceId:'',createdAt:new Date().toISOString()};
+  const i=DB.findIndex(r=>r.id===rec.id);
+  if(i>=0){rec.sourceId=DB[i].sourceId||'';DB[i]=rec}else DB.push(rec);
+  persist();resetForm();updateCount();renderHero();
+  toast(t('msg.saved'),'ok');switchTab('list');
+}
+function resetForm(){
+  ['editId','f-name','f-dateStart','f-dateEnd','f-venueDetail','f-role','f-notes']
+    .forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f-type').value='组会';
+  document.querySelectorAll('input[name=venue]').forEach(r=>r.checked=false);
+  document.getElementById('cancelBtn').classList.add('hidden');
+  applyTypeDefault();
+}
+function editRecord(id){
+  const r=DB.find(x=>x.id===id);if(!r)return;
+  document.getElementById('editId').value=r.id;
+  document.getElementById('f-type').value=r.type;
+  document.getElementById('f-name').value=r.name;
+  document.getElementById('f-dateStart').value=r.dateStart;
+  document.getElementById('f-dateEnd').value=r.dateEnd;
+  document.getElementById('f-venueDetail').value=r.venueDetail;
+  document.getElementById('roleField').classList.toggle('hidden',r.type!=='conference');
+  document.getElementById('f-role').value=r.role||'';
+  document.getElementById('f-notes').value=r.notes;
+  if(r.venueMode==='线上')document.getElementById('v-on').checked=true;
+  else if(r.venueMode==='线下')document.getElementById('v-off').checked=true;
+  document.getElementById('cancelBtn').classList.remove('hidden');
+  switchTab('add');window.scrollTo({top:0,behavior:'smooth'});
+}
+async function delRecord(id){
+  if(!await ask(t('ask.del')))return;
+  DB=DB.filter(r=>r.id!==id);persist();renderList();updateCount();
+  renderHero();toast(t('msg.deleted'));
+}
+
+function fmtDate(r){return r.dateEnd&&r.dateEnd!==r.dateStart
+  ?r.dateStart+' ~ '+r.dateEnd:r.dateStart}
+function esc(s){return(s||'').replace(/[&<>"]/g,
+  c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+function refreshYearFilter(){
+  const yrs=[...new Set(DB.map(r=>r.dateStart.slice(0,4)).filter(Boolean))].sort().reverse();
+  const sel=document.getElementById('flt-year'),cur=sel.value;
+  sel.innerHTML=`<option value="">${t('all')}</option>`+yrs.map(y=>`<option>${y}</option>`).join('');
+  sel.value=cur;
+}
+function renderList(){
+  refreshYearFilter();
+  const y=document.getElementById('flt-year').value,
+        tp=document.getElementById('flt-type').value,
+        q=document.getElementById('flt-q').value.trim().toLowerCase();
+  let rows=DB.filter(r=>(!y||r.dateStart.startsWith(y))&&(!tp||r.type===tp)&&
+    (!q||(r.name+' '+r.notes).toLowerCase().includes(q)));
+  rows.sort((a,b)=>(b.dateStart||'').localeCompare(a.dateStart||''));
+  const box=document.getElementById('listBox');
+  if(!rows.length){box.innerHTML=
+    `<div class="empty"><div class="big">🗓️</div>${t('l.empty')}</div>`;return}
+  box.innerHTML=`<table><thead><tr><th>${t('c.date')}</th><th>${t('c.type')}</th>
+    <th>${t('c.name')}</th><th>${t('c.loc')}</th><th>${t('c.role')}</th>
+    <th>${t('c.notes')}</th><th></th></tr></thead><tbody>`+
+    rows.map(r=>`<tr>
+      <td style="white-space:nowrap">${esc(fmtDate(r))}</td>
+      <td><span class="pill">${esc(typeLabel(r.type))}</span></td>
+      <td>${esc(r.name)}${r.sourceId?` <span class="meta">${t('fromCal')}</span>`:''}</td>
+      <td>${r.venueMode?`<span class="pill ${r.venueMode==='线上'?'on':'off'}">${r.venueMode==='线上'?t('online'):t('offline')}</span> `:''}${esc(r.venueDetail)}</td>
+      <td>${r.role?esc(r.role):'—'}</td>
+      <td style="max-width:240px;color:var(--muted)">${esc(r.notes)}</td>
+      <td style="white-space:nowrap">
+        <button class="rowbtn" onclick="editRecord('${r.id}')">${t('edit')}</button>
+        <button class="rowbtn danger" onclick="delRecord('${r.id}')">${t('del')}</button>
+      </td></tr>`).join('')+`</tbody></table>`;
+}
+function updateCount(){document.getElementById('cnt').textContent=DB.length?`(${DB.length})`:''}
+
+function countUp(el,to){
+  const dur=620,t0=performance.now();
+  (function step(tt){const p=Math.min(1,(tt-t0)/dur);
+    el.textContent=Math.round(to*(1-Math.pow(1-p,3)));
+    if(p<1)requestAnimationFrame(step);})(t0);
+}
+function statData(){
+  const yr=new Date().getFullYear().toString();
+  return[[DB.length,t('st.total')],
+    [DB.filter(r=>r.type==='conference').length,t('st.conf')],
+    [DB.filter(r=>['oral','poster'].includes(r.role)).length,t('st.talks')],
+    [DB.filter(r=>r.dateStart.startsWith(yr)).length,t('st.year',{y:yr})]];
+}
+function renderHero(){
+  const d=statData(),box=document.getElementById('heroStats');
+  box.innerHTML=d.map(([n,l])=>
+    `<div class="hs"><span class="n">0</span><span class="l">${l}</span></div>`).join('');
+  [...box.querySelectorAll('.n')].forEach((el,i)=>countUp(el,d[i][0]));
+}
+function bars(c,pairs){
+  if(!pairs.length){c.innerHTML=`<div class="empty" style="padding:24px">${t('nodata')}</div>`;return}
+  const max=Math.max(1,...pairs.map(p=>p[1]));
+  c.innerHTML=pairs.map(([k,v])=>`<div class="bar-row">
+    <div class="lab">${esc(k)}</div>
+    <div class="bar-track"><div class="bar-fill" data-w="${v/max*100}"></div></div>
+    <div class="val">${v}</div></div>`).join('');
+  requestAnimationFrame(()=>c.querySelectorAll('.bar-fill')
+    .forEach(b=>b.style.width=b.dataset.w+'%'));
+}
+function renderStat(){
+  const yr=new Date().getFullYear().toString();
+  const d=statData();
+  document.getElementById('statCards').innerHTML=d.map(([n,l])=>
+    `<div class="stat reveal"><div class="n">0</div><div class="l">${l}</div></div>`).join('');
+  document.querySelectorAll('#statCards .n').forEach((el,i)=>countUp(el,d[i][0]));
+  document.getElementById('monthTitle').textContent=t('monthly.y',{y:yr});
+  const mc=new Array(12).fill(0);
+  DB.forEach(r=>{if(r.dateStart.startsWith(yr)){
+    const m=parseInt(r.dateStart.slice(5,7),10)-1;if(m>=0&&m<12)mc[m]++}});
+  const mmax=Math.max(1,...mc);
+  document.getElementById('monthChart').innerHTML=mc.map((v,i)=>`<div class="mbar">
+    <div class="mv">${v||''}</div><div class="fill" data-h="${v/mmax*100}"></div>
+    <div class="mn">${i+1}</div></div>`).join('');
+  requestAnimationFrame(()=>document.querySelectorAll('#monthChart .fill')
+    .forEach(f=>f.style.height=f.dataset.h+'%'));
+  const byT={};DB.forEach(r=>{const k=typeLabel(r.type);byT[k]=(byT[k]||0)+1});
+  bars(document.getElementById('byType'),Object.entries(byT).sort((a,b)=>b[1]-a[1]));
+  const byR={};DB.filter(r=>r.type==='conference').forEach(r=>{
+    const k=r.role||'(—)';byR[k]=(byR[k]||0)+1});
+  bars(document.getElementById('byRole'),Object.entries(byR).sort((a,b)=>b[1]-a[1]));
+  observeReveals();
+}
+
+function renderSettings(){
+  document.getElementById('set-clientId').value=SET.clientId||'';
+  document.getElementById('set-supaUrl').value=SET.supaUrl||'';
+  document.getElementById('set-supaKey').value=SET.supaKey||'';
+  document.getElementById('set-keywords').value=(SET.keywords||[]).join(',');
+  const box=document.getElementById('mapBox');box.innerHTML='';
+  (SET.map||[]).forEach(([k,tp])=>box.appendChild(mapRow(k,tp)));
+  if(!SET.map||!SET.map.length)box.appendChild(mapRow('','组会'));
+}
+function mapRow(k,tp){
+  const d=document.createElement('div');d.className='map-row row';
+  d.innerHTML=`<input class="map-k" placeholder="${t('kw.ph')}" value="${esc(k)}" style="flex:1">
+    <select class="map-t">${TYPES.map(x=>
+      `<option value="${x}" ${x===tp?'selected':''}>${esc(typeLabel(x))}</option>`).join('')}</select>
+    <button class="rowbtn danger" onclick="this.parentNode.remove()">${t('del')}</button>`;
+  return d;
+}
+function addMapRow(){document.getElementById('mapBox').appendChild(mapRow('','组会'))}
+
+function renderCalBanner(){
+  const b=document.getElementById('calBanner');
+  const isHttp=location.protocol==='https:'||location.hostname==='localhost';
+  if(!SET.clientId){b.className='banner warn';b.innerHTML=t('b.noClient');}
+  else if(!isHttp){b.className='banner warn';b.innerHTML=t('b.local');}
+  else{b.className='banner ok';b.innerHTML=accessToken?t('b.connected'):t('b.ready');}
+  document.getElementById('connBtn').disabled=!SET.clientId||!isHttp;
+  document.getElementById('pullBtn').classList.toggle('hidden',!accessToken);
+  document.getElementById('signoutBtn').classList.toggle('hidden',!accessToken);
+}
+function gAuth(){
+  if(!SET.clientId){toast(t('msg.needClient'),'err');return}
+  if(typeof google==='undefined'||!google.accounts){toast(t('msg.gLib'),'err');return}
+  if(!tokenClient){
+    tokenClient=google.accounts.oauth2.initTokenClient({
+      client_id:SET.clientId,
+      scope:'https://www.googleapis.com/auth/calendar.readonly',
+      callback:(resp)=>{if(resp&&resp.access_token){accessToken=resp.access_token;
+        renderCalBanner();toast(t('msg.authed'),'ok')}
+        else toast(t('msg.authFail'),'err');}});
+  }
+  tokenClient.requestAccessToken({prompt:accessToken?'':'consent'});
+}
+function gSignout(){
+  if(accessToken&&google.accounts)google.accounts.oauth2.revoke(accessToken,()=>{});
+  accessToken=null;renderCalBanner();toast(t('msg.disconnected'));
+}
+async function gPull(){
+  if(!accessToken){toast(t('msg.connectFirst'),'err');return}
+  const days=parseInt(document.getElementById('cal-range').value,10);
+  const timeMin=days===0?new Date(new Date().getFullYear(),0,1).toISOString()
+    :new Date(Date.now()-days*864e5).toISOString();
+  const timeMax=new Date(Date.now()+864e5).toISOString();
+  let items=[],pageToken='';
+  try{
+    do{
+      const u=new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
+      u.searchParams.set('timeMin',timeMin);u.searchParams.set('timeMax',timeMax);
+      u.searchParams.set('singleEvents','true');u.searchParams.set('orderBy','startTime');
+      u.searchParams.set('maxResults','250');
+      if(pageToken)u.searchParams.set('pageToken',pageToken);
+      const r=await fetch(u,{headers:{Authorization:'Bearer '+accessToken}});
+      if(!r.ok){toast(t('msg.pullFail',{s:r.status}),'err');return}
+      const j=await r.json();items=items.concat(j.items||[]);
+      pageToken=j.nextPageToken||'';
+    }while(pageToken&&items.length<1000);
+  }catch(e){toast(t('msg.netErr',{m:e.message}),'err');return}
+  const kws=SET.keywords||[];
+  const existing=new Set(DB.map(r=>r.sourceId).filter(Boolean));
+  lastPulled=items.map(ev=>{
+    const hay=((ev.summary||'')+' '+(ev.description||'')).toLowerCase();
+    if(!kws.some(k=>hay.includes(k)))return null;
+    return{ev,sId:'gcal:'+ev.id,dup:existing.has('gcal:'+ev.id)};
+  }).filter(Boolean);
+  const box=document.getElementById('impBox');
+  document.getElementById('impCard').classList.remove('hidden');
+  document.getElementById('impHead').textContent=
+    t('imp.head',{n:lastPulled.length,d:lastPulled.filter(x=>x.dup).length});
+  if(!lastPulled.length){box.innerHTML=
+    `<div class="empty" style="padding:30px">${t('imp.none')}</div>`;return}
+  box.innerHTML=lastPulled.map((x,i)=>{const m=mapEvent(x.ev);
+    return `<div class="imp-item">
+      <input type="checkbox" class="imp-cb" data-i="${i}" ${x.dup?'':'checked'}>
+      <div><div><span class="pill">${esc(typeLabel(m.type))}</span> ${esc(m.name)}
+        ${x.dup?`<span class="meta">${t('fromCal')}</span>`:''}</div>
+      <div class="meta">${esc(fmtDate(m))}${m.venueMode?' · '+(m.venueMode==='线上'?t('online'):t('offline')):''}
+        ${m.venueDetail?' '+esc(m.venueDetail):''}</div></div></div>`;}).join('');
+}
+function mapEvent(ev){
+  const start=ev.start&&(ev.start.date||ev.start.dateTime)||'';
+  const end=ev.end&&(ev.end.date||ev.end.dateTime)||'';
+  const ds=start.slice(0,10);let de=end.slice(0,10);
+  if(ev.end&&ev.end.date&&de&&de!==ds){
+    const d=new Date(de);d.setDate(d.getDate()-1);de=d.toISOString().slice(0,10);}
+  const hay=((ev.summary||'')+' '+(ev.description||'')).toLowerCase();
+  let type='其他';
+  for(const [k,tp] of (SET.map||[])){if(k&&hay.includes(k)){type=tp;break}}
+  const loc=(ev.location||'').trim();
+  return{type,name:ev.summary||'(no title)',dateStart:ds,dateEnd:de===ds?'':de,
+    venueMode:loc?(/zoom|meet|teams|webex/i.test(loc)?'线上':'线下'):'线上',
+    venueDetail:loc||'',role:'',notes:(ev.description||'').slice(0,500),
+    sourceId:'gcal:'+ev.id,createdAt:new Date().toISOString()};
+}
+function confirmImport(){
+  const cbs=[...document.querySelectorAll('.imp-cb:checked')];
+  if(!cbs.length){toast(t('msg.noSel'),'err');return}
+  let added=0;
+  cbs.forEach(cb=>{const x=lastPulled[+cb.dataset.i];if(!x)return;
+    if(DB.some(r=>r.sourceId===x.sId))return;
+    const rec=mapEvent(x.ev);rec.id=uid();DB.push(rec);added++;});
+  persist();updateCount();renderHero();
+  toast(t('msg.importedN',{n:added}),'ok');switchTab('list');
+}
+
+function exportJSON(){
+  const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='kaileme-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();
+  toast(t('msg.exported'),'ok');
+}
+function importJSON(ev){
+  const f=ev.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=async()=>{try{
+    const arr=JSON.parse(rd.result);if(!Array.isArray(arr))throw 0;
+    if(!await ask(t('ask.import',{n:arr.length,m:DB.length})))return;
+    DB=arr;persist();updateCount();renderHero();renderList();
+    toast(t('msg.imported'),'ok');switchTab('list');
+  }catch(e){toast(t('msg.badFile'),'err')}};
+  rd.readAsText(f);ev.target.value='';
+}
+
+const _io=new IntersectionObserver(es=>es.forEach(e=>{
+  if(e.isIntersecting){e.target.classList.add('in');_io.unobserve(e.target)}
+}),{threshold:.08,rootMargin:'0px 0px -40px 0px'});
+function observeReveals(){
+  document.querySelectorAll('.reveal:not(.in)').forEach(el=>_io.observe(el));
+}
+document.querySelectorAll('section .card').forEach(el=>el.classList.add('reveal'));
+document.getElementById('modalBg').addEventListener('click',e=>{
+  if(e.target.id==='modalBg')modalResolve(false)});
+applyLang();resetForm();updateCount();renderHero();observeReveals();
+initCloud();if(cloud)pullCloud();
+</script>
+</body>
+</html>
