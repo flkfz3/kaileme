@@ -53,6 +53,19 @@ async function googleAccessToken(): Promise<string> {
   return (await r.json()).access_token as string;
 }
 
+// Calendar descriptions for Zoom/Teams invites are huge boilerplate blobs
+// ("Join Zoom Meeting … One tap mobile … Join by SIP …"). Keep only the
+// human part before the boilerplate; if nothing useful is left, return null.
+function cleanNotes(desc: string): string | null {
+  let s = (desc || "").replace(/\r/g, "");
+  const cut = s.search(
+    /(Join Zoom Meeting|is inviting you to a|ZoomGov Meeting|Microsoft Teams meeting|One tap mobile|Meeting ID:|Join by SIP|https?:\/\/\S*(zoom|teams|webex|meet\.google)|---)/i,
+  );
+  if (cut >= 0) s = s.slice(0, cut);
+  s = s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return s ? s.slice(0, 200) : null;
+}
+
 function rowFromEvent(ev: any, owner: string) {
   const start = ev?.start?.date || ev?.start?.dateTime || "";
   const end = ev?.end?.date || ev?.end?.dateTime || "";
@@ -66,6 +79,10 @@ function rowFromEvent(ev: any, owner: string) {
   const hay = ((ev.summary || "") + " " + (ev.description || "")).toLowerCase();
   const loc = (ev.location || "").trim();
   const online = !loc || /zoom|meet\.google|teams|webex/i.test(loc);
+  // For online events with no location, surface the join URL as the venue
+  // detail so the app can show one clickable link instead of a wall of text.
+  const urlM = (ev.description || "").match(/https?:\/\/[^\s<>"]+/);
+  const venueDetail = loc || (online && urlM ? urlM[0] : null);
   return {
     id: "gcal:" + ev.id,
     type: mapType(ev.summary || "", hay),
@@ -73,9 +90,9 @@ function rowFromEvent(ev: any, owner: string) {
     date_start: ds || null,
     date_end: de && de !== ds ? de : null,
     venue_mode: loc ? (online ? "线上" : "线下") : "线上",
-    venue_detail: loc || null,
+    venue_detail: venueDetail,
     role: null,
-    notes: (ev.description || "").slice(0, 500) || null,
+    notes: cleanNotes(ev.description || ""),
     source_id: "gcal:" + ev.id,
     created_at: new Date().toISOString(),
     owner,
@@ -209,8 +226,7 @@ Deno.serve(async (req: Request) => {
           venue_detail: r.venue_detail,
           type: r.type,
         };
-        const cur = ex && ex.notes;
-        if (!cur || String(cur).trim() === "") patch.notes = r.notes;
+        patch.notes = r.notes; // non-edited row: refresh cleaned notes
         const { error } = await sb.from("meetings").update(patch).eq("id", r.id);
         if (!error) updated++;
       }
