@@ -154,6 +154,17 @@
   .mbar:hover .fill{filter:brightness(1.12)}
   .mbar .mn{font-size:11px;color:var(--muted)}
   .mbar .mv{font-size:11px;color:var(--ink);font-weight:650;height:14px}
+  .heatmap{overflow-x:auto;padding:4px 0 2px}
+  .hm-grid{display:flex;gap:3px;min-width:max-content}
+  .hm-col{display:flex;flex-direction:column;gap:3px}
+  .hm-c{width:13px;height:13px;border-radius:3px;background:rgba(37,99,235,.09)}
+  .hm-c.l1{background:rgba(37,99,235,.32)}
+  .hm-c.l2{background:rgba(37,99,235,.54)}
+  .hm-c.l3{background:rgba(37,99,235,.76)}
+  .hm-c.l4{background:rgba(37,99,235,.98)}
+  .hm-legend{display:flex;align-items:center;gap:5px;justify-content:flex-end;
+    font-size:11px;color:var(--muted);margin-top:12px}
+  .hm-legend .hm-c{width:11px;height:11px}
   .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
   .banner{font-size:13px;padding:12px 15px;border-radius:10px;margin-bottom:16px;line-height:1.6}
   .banner.warn{background:#fff7e8;border:1px solid #f0dba8;color:#7a5b16}
@@ -217,6 +228,7 @@
   <div class="hero">
     <div class="hero-tools">
       <button class="lang-btn" id="langBtn" onclick="toggleLang()">中</button>
+      <button id="syncBtn" class="hidden" data-i18n="syncNow" onclick="manualSync()"></button>
       <button id="signOutBtn" class="hidden" data-i18n="signOut" onclick="doSignOut()"></button>
       <button data-i18n="exportBackup" onclick="exportJSON()"></button>
       <button data-i18n="importBackup" onclick="document.getElementById('importFile').click()"></button>
@@ -231,7 +243,6 @@
     <button class="tab active" data-tab="add" data-i18n="tab.add" onclick="switchTab('add')"></button>
     <button class="tab" data-tab="list" onclick="switchTab('list')"><span data-i18n="tab.list"></span> <span id="cnt"></span></button>
     <button class="tab" data-tab="stat" data-i18n="tab.stat" onclick="switchTab('stat')"></button>
-    <button class="tab" data-tab="cal" data-i18n="tab.cal" onclick="switchTab('cal')"></button>
     <button class="tab" data-tab="set" data-i18n="tab.set" onclick="switchTab('set')"></button>
   </div>
   <div class="tabs-line"></div>
@@ -309,39 +320,17 @@
 
   <section id="tab-stat" class="hidden">
     <div class="stats-cards" id="statCards"></div>
+    <div class="card"><div class="chart-title" data-i18n="heatTitle"></div>
+      <div id="heatmap" class="heatmap"></div>
+      <div class="hm-legend"><span data-i18n="heatLess"></span>
+        <span class="hm-c"></span><span class="hm-c l1"></span><span class="hm-c l2"></span>
+        <span class="hm-c l3"></span><span class="hm-c l4"></span>
+        <span data-i18n="heatMore"></span></div></div>
     <div class="card"><div class="chart-title" id="monthTitle"></div>
       <div class="month-chart" id="monthChart"></div></div>
     <div class="grid">
       <div class="card"><div class="chart-title" data-i18n="byType"></div><div id="byType"></div></div>
       <div class="card"><div class="chart-title" data-i18n="byRole"></div><div id="byRole"></div></div>
-    </div>
-  </section>
-
-  <section id="tab-cal" class="hidden">
-    <div class="card">
-      <div id="calBanner"></div>
-      <div class="row" style="flex-wrap:wrap;gap:12px">
-        <button class="primary" id="connBtn" data-i18n="connect" onclick="gAuth()"></button>
-        <button id="signoutBtn" class="hidden" data-i18n="disconnect" onclick="gSignout()"></button>
-        <div class="field" style="margin:0"><label data-i18n="range"></label>
-          <select id="cal-range">
-            <option value="180" data-i18n="r.180"></option>
-            <option value="365" selected data-i18n="r.365"></option>
-            <option value="730" data-i18n="r.730"></option>
-            <option value="0" data-i18n="r.ytd"></option>
-          </select></div>
-        <button id="pullBtn" class="hidden" data-i18n="pull" onclick="gPull()"></button>
-      </div>
-      <div class="note" data-i18n="calNote"></div>
-    </div>
-    <div class="card hidden" id="impCard">
-      <div class="chart-title" id="impHead"></div>
-      <div id="impBox"></div>
-      <div class="formfoot">
-        <button class="primary" data-i18n="importSel" onclick="confirmImport()"></button>
-        <button data-i18n="selAll" onclick="document.querySelectorAll('.imp-cb').forEach(c=>c.checked=true)"></button>
-        <button data-i18n="selNone" onclick="document.querySelectorAll('.imp-cb').forEach(c=>c.checked=false)"></button>
-      </div>
     </div>
   </section>
 
@@ -354,15 +343,8 @@
       <div class="field"><label data-i18n="s.supaKey"></label>
         <input id="set-supaKey" placeholder="eyJhbGci... (anon public key)"></div>
       <button class="rowbtn" style="margin-bottom:20px" data-i18n="migrate" onclick="migrateUp()"></button>
-      <div class="chart-title" data-i18n="s.title"></div>
-      <div class="field"><label data-i18n="s.client"></label>
-        <input id="set-clientId" placeholder="xxxx.apps.googleusercontent.com"></div>
-      <div class="field"><label data-i18n="s.kw"></label>
-        <input id="set-keywords" data-ph="s.kwph"></div>
-      <div class="chart-title" style="margin-top:20px" data-i18n="s.mapTitle"></div>
-      <div class="note" style="margin-top:0;margin-bottom:12px" data-i18n="s.mapNote"></div>
-      <div id="mapBox"></div>
-      <button class="rowbtn" style="margin-top:10px" data-i18n="addRow" onclick="addMapRow()"></button>
+      <div class="note" style="margin-top:0;margin-bottom:12px" data-i18n="s.syncNote"></div>
+      <button class="rowbtn primary" style="margin-bottom:4px" data-i18n="syncNow" onclick="manualSync()"></button>
       <div class="formfoot" style="margin-top:20px">
         <button class="primary" data-i18n="saveSet" onclick="saveSettings()"></button>
       </div>
@@ -420,10 +402,16 @@ const I18N={
   'msg.signedOut':'Signed out',
   's.cloud':'Cloud sync (Supabase)',
   's.cloudNote':'Free cloud database — any device that opens this page stays in sync automatically. One-time setup (~5 min) in SUPABASE_SETUP.md.',
+  's.syncNote':'Calendar sync runs automatically when you open the app. Use this to pull from Google Calendar right now and see the result.',
   's.supaUrl':'Supabase Project URL','s.supaKey':'Supabase anon public key',
   migrate:'⬆ Upload local data to cloud',
   'msg.cloudErr':'Cloud sync error — check Supabase URL / key',
   'msg.needCloud':'Configure Supabase first (Settings tab)',
+  'msg.syncing':'Syncing with Google Calendar…',
+  'msg.syncOk':'Synced ✓  scanned {s}, added {i}, updated {u}',
+  'msg.syncFail':'Sync failed',
+  syncNow:'⟳ Sync now',
+  heatTitle:'Activity (last 12 months)','heatLess':'less','heatMore':'more',
   'msg.migrated':'Uploaded {n} records to cloud',
   'ask.migrate':'Upload {n} local records to the cloud database?',
   'ty.组会':'Lab meeting','ty.组内报告':'Lab talk',
@@ -490,10 +478,16 @@ const I18N={
   'msg.signedOut':'已登出',
   's.cloud':'云同步（Supabase）',
   's.cloudNote':'免费云数据库——任何设备打开此页都自动同步。一次性配置（约 5 分钟）见 SUPABASE_SETUP.md。',
+  's.syncNote':'打开应用时会自动同步日历。点这个可以立刻从 Google 日历拉取并看到结果。',
   's.supaUrl':'Supabase Project URL','s.supaKey':'Supabase anon public key',
   migrate:'⬆ 本地数据上传到云',
   'msg.cloudErr':'云同步出错——检查 Supabase URL / key',
   'msg.needCloud':'先在设置里配置 Supabase',
+  'msg.syncing':'正在和 Google 日历同步…',
+  'msg.syncOk':'同步完成 ✓  扫描 {s},新增 {i},更新 {u}',
+  'msg.syncFail':'同步失败',
+  syncNow:'⟳ 立即同步',
+  heatTitle:'活跃度（近 12 个月）','heatLess':'少','heatMore':'多',
   'msg.migrated':'已上传 {n} 条到云',
   'ask.migrate':'把 {n} 条本地记录上传到云数据库？',
   'ty.组会':'组会 (lab meeting)','ty.组内报告':'组内报告 (lab talk)',
@@ -584,10 +578,14 @@ function initCloud(){
 function updateAuthUI(authed){
   const g=document.getElementById('authGate');
   const so=document.getElementById('signOutBtn');
-  if(!cloud){g.classList.add('hidden');so.classList.add('hidden');return}
+  const sy=document.getElementById('syncBtn');
+  if(!cloud){g.classList.add('hidden');so.classList.add('hidden');
+    sy.classList.add('hidden');return}
   if(authed){g.classList.add('hidden');so.classList.remove('hidden');
+    sy.classList.remove('hidden');
     pullCloud();syncGcal().then(()=>pullCloud());}
-  else{g.classList.remove('hidden');so.classList.add('hidden');}
+  else{g.classList.remove('hidden');so.classList.add('hidden');
+    sy.classList.add('hidden');}
 }
 async function refreshAuthGate(){
   if(!cloud){document.getElementById('authGate').classList.add('hidden');return}
@@ -614,14 +612,23 @@ async function doSignUp(){
 }
 async function doSignOut(){if(sb){await sb.auth.signOut();toast(t('msg.signedOut'));}}
 async function syncGcal(){
-  if(!cloud||!sb)return;
+  if(!cloud||!sb)return null;
   try{
     const {data}=await sb.auth.getSession();
     const tok=data&&data.session&&data.session.access_token;
-    if(!tok)return;
-    await fetch(SET.supaUrl.replace(/\/+$/,'')+'/functions/v1/sync-gcal',
+    if(!tok)return null;
+    const res=await fetch(SET.supaUrl.replace(/\/+$/,'')+'/functions/v1/sync-gcal',
       {method:'POST',headers:{Authorization:'Bearer '+tok}});
-  }catch(e){console.warn('gcal sync',e)}
+    return await res.json().catch(()=>({ok:false,error:'HTTP '+res.status}));
+  }catch(e){console.warn('gcal sync',e);return{ok:false,error:String(e)}}
+}
+async function manualSync(){
+  if(!cloud||!sb){toast(t('msg.needCloud'),'err');return}
+  toast(t('msg.syncing'));
+  const r=await syncGcal();
+  if(r&&r.ok){await pullCloud();
+    toast(t('msg.syncOk',{s:r.scanned,i:r.inserted,u:r.updated}),'ok');}
+  else toast(t('msg.syncFail')+(r&&r.error?': '+r.error:''),'err');
 }
 let _pushing=false,_pushAgain=false;
 async function pushCloud(){
@@ -680,17 +687,11 @@ function defaultSettings(){return{clientId:'',supaUrl:'',supaKey:'',
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem(SKEY));
   return s&&s.keywords?s:defaultSettings()}catch(e){return defaultSettings()}}
 function saveSettings(){
-  SET.clientId=document.getElementById('set-clientId').value.trim();
   SET.supaUrl=document.getElementById('set-supaUrl').value.trim();
   SET.supaKey=document.getElementById('set-supaKey').value.trim();
-  SET.keywords=document.getElementById('set-keywords').value
-    .split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
-  SET.map=[...document.querySelectorAll('.map-row')].map(r=>[
-    r.querySelector('.map-k').value.trim().toLowerCase(),
-    r.querySelector('.map-t').value]).filter(p=>p[0]);
   localStorage.setItem(SKEY,JSON.stringify(SET));
-  tokenClient=null;initCloud();toast(t('msg.setSaved'),'ok');
-  if(cloud)pullCloud();
+  initCloud();toast(t('msg.setSaved'),'ok');
+  if(cloud)refreshAuthGate();
 }
 
 const TYPE_DEFAULT={
@@ -723,14 +724,13 @@ function toggleVenue(){
 
 function switchTab(tp){
   document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===tp));
-  ['add','list','stat','cal','set'].forEach(x=>{
+  ['add','list','stat','set'].forEach(x=>{
     const el=document.getElementById('tab-'+x);
     if(x===tp){el.classList.remove('hidden');
       el.style.animation='none';el.offsetHeight;el.style.animation='';}
     else el.classList.add('hidden');});
   if(tp==='list')renderList();
   if(tp==='stat')renderStat();
-  if(tp==='cal')renderCalBanner();
   if(tp==='set')renderSettings();
   observeReveals();
 }
@@ -889,17 +889,35 @@ function renderStat(){
   const byR={};DB.filter(r=>r.type==='conference').forEach(r=>{
     const k=r.role||'(—)';byR[k]=(byR[k]||0)+1});
   bars(document.getElementById('byRole'),Object.entries(byR).sort((a,b)=>b[1]-a[1]));
+  renderHeatmap();
   observeReveals();
+}
+function renderHeatmap(){
+  const box=document.getElementById('heatmap');if(!box)return;
+  const cnt={};
+  DB.forEach(r=>{const d=(r.dateStart||'').slice(0,10);if(d)cnt[d]=(cnt[d]||0)+1});
+  const max=Math.max(1,...Object.values(cnt));
+  const lvl=v=>!v?'':v>=max*.75?' l4':v>=max*.5?' l3':v>=max*.25?' l2':' l1';
+  const end=new Date();end.setHours(0,0,0,0);
+  const start=new Date(end);start.setDate(start.getDate()-52*7-end.getDay());
+  let html='<div class="hm-grid">',cur=new Date(start);
+  for(let w=0;w<53;w++){
+    html+='<div class="hm-col">';
+    for(let dy=0;dy<7;dy++){
+      const iso=cur.toISOString().slice(0,10);
+      const v=cur<=end?(cnt[iso]||0):-1;
+      html+=v<0?'<div class="hm-c" style="visibility:hidden"></div>'
+        :`<div class="hm-c${lvl(v)}" title="${iso}: ${v}"></div>`;
+      cur.setDate(cur.getDate()+1);
+    }
+    html+='</div>';
+  }
+  box.innerHTML=html+'</div>';
 }
 
 function renderSettings(){
-  document.getElementById('set-clientId').value=SET.clientId||'';
   document.getElementById('set-supaUrl').value=SET.supaUrl||'';
   document.getElementById('set-supaKey').value=SET.supaKey||'';
-  document.getElementById('set-keywords').value=(SET.keywords||[]).join(',');
-  const box=document.getElementById('mapBox');box.innerHTML='';
-  (SET.map||[]).forEach(([k,tp])=>box.appendChild(mapRow(k,tp)));
-  if(!SET.map||!SET.map.length)box.appendChild(mapRow('','组会'));
 }
 function mapRow(k,tp){
   const d=document.createElement('div');d.className='map-row row';

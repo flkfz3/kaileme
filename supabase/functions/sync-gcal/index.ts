@@ -15,7 +15,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY (auto-injected; or copy from API settings)
 // Optional:
 //   GCAL_KEYWORDS   comma-separated, default "meeting,seminar,conference,talk,workshop"
-//   GCAL_DAYS_BACK  how many days back to scan, default "180"
+//   GCAL_DAYS_BACK  how many days back to scan, default "3650" (~10 years)
 //   GCAL_CALENDAR   calendar id, default "primary"
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -88,7 +88,7 @@ Deno.serve(async () => {
     if (!owner) throw new Error("OWNER_USER_ID not set");
     const kws = env("GCAL_KEYWORDS", "meet,zoom,seminar,conference,talk,colloquium,workshop")
       .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-    const daysBack = parseInt(env("GCAL_DAYS_BACK", "180"), 10);
+    const daysBack = parseInt(env("GCAL_DAYS_BACK", "3650"), 10);
     const cal = encodeURIComponent(env("GCAL_CALENDAR", "primary"));
 
     const token = await googleAccessToken();
@@ -114,7 +114,7 @@ Deno.serve(async () => {
       const j = await r.json();
       items = items.concat(j.items || []);
       pageToken = j.nextPageToken || "";
-    } while (pageToken && items.length < 2000);
+    } while (pageToken && items.length < 5000);
 
     const rows = items
       .filter((ev) => {
