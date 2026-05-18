@@ -85,7 +85,7 @@ Deno.serve(async () => {
   try {
     const owner = env("OWNER_USER_ID");
     if (!owner) throw new Error("OWNER_USER_ID not set");
-    const kws = env("GCAL_KEYWORDS", "meeting,seminar,conference,talk,workshop")
+    const kws = env("GCAL_KEYWORDS", "meet,zoom,seminar,conference,talk,workshop")
       .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const daysBack = parseInt(env("GCAL_DAYS_BACK", "180"), 10);
     const cal = encodeURIComponent(env("GCAL_CALENDAR", "primary"));
