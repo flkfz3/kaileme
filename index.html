@@ -581,6 +581,13 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
+// Supabase project URL + anon key are baked in so the app is cloud-enabled on
+// EVERY device with no per-device setup. The anon key is public by design
+// (Supabase secures data via Row Level Security, not key secrecy) and is meant
+// to ship in client code. Declared here (before loadSettings runs at startup)
+// to avoid a temporal-dead-zone ReferenceError. Settings can still override.
+const SUPA_URL='https://kbcftsexzmxjtlljgcyi.supabase.co';
+const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtiY2Z0c2V4em14anRsbGpnY3lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwNTAwMzMsImV4cCI6MjA5NDYyNjAzM30.YGKOjmNzNPI-d4A6nDtFdYsExRqvERoY_7IctbMIN1A';
 let sb=null, cloud=false;
 let DB=load(), SET=loadSettings();
 let LANG=localStorage.getItem(LKEY)||'en';
@@ -1001,12 +1008,16 @@ function askVenueScope(n){return new Promise(res=>{_vsCb=res;
 function vsResolve(v){document.getElementById('vsBg').classList.remove('show');
   if(_vsCb){_vsCb(v);_vsCb=null}}
 
-function defaultSettings(){return{clientId:'',supaUrl:'',supaKey:'',
+function defaultSettings(){return{clientId:'',supaUrl:SUPA_URL,supaKey:SUPA_KEY,
   keywords:['meet','zoom','seminar','conference','talk','colloquium','workshop'],
   map:[['seminar','seminar'],['colloquium','seminar'],['talk','seminar'],
        ['conference','conference'],['meet','Project meeting']]}}
+// Backfill cloud creds from the baked defaults whenever a saved settings
+// object lacks them, so older devices that saved settings before the creds
+// were baked in still get cloud (and the login UI) automatically.
 function loadSettings(){try{const s=JSON.parse(localStorage.getItem(SKEY));
-  return s&&s.keywords?s:defaultSettings()}catch(e){return defaultSettings()}}
+  if(s&&s.keywords){s.supaUrl=s.supaUrl||SUPA_URL;s.supaKey=s.supaKey||SUPA_KEY;return s}
+  return defaultSettings()}catch(e){return defaultSettings()}}
 function saveSettings(){
   SET.supaUrl=document.getElementById('set-supaUrl').value.trim();
   SET.supaKey=document.getElementById('set-supaKey').value.trim();
@@ -1197,11 +1208,24 @@ function editRecord(id){
   switchTab('add');window.scrollTo({top:0,behavior:'smooth'});
 }
 let _undoRec=null,_undoT;
+// gcal:/mail: rows are calendar/email-sourced. Deleting one must persist
+// across syncs (deletion is a user intent, like an edit) — otherwise the
+// next sync re-imports it. A tombstone row in `deleted_sync` tells the
+// sync function to never resurrect this id. Undo removes the tombstone.
+function isSynced(id){return /^(gcal|mail):/.test(id||'')}
+async function tombstone(id,add){
+  if(!cloud||!sb||!isSynced(id))return;
+  try{
+    if(add)await sb.from('deleted_sync').upsert({id});
+    else await sb.from('deleted_sync').delete().eq('id',id);
+  }catch(e){console.warn('tombstone',e)}
+}
 async function delRecord(id){
   if(!await ask(t('ask.del')))return;
   const r=DB.find(x=>x.id===id);if(!r)return;
   _undoRec=r;
   DB=DB.filter(x=>x.id!==id);persist();
+  tombstone(id,true);
   if(recDrawerOpen())closeRec();
   renderList();updateCount();renderHero();
   toastUndo();
@@ -1218,6 +1242,7 @@ function toastUndo(){
 }
 function undoDelete(){
   if(!_undoRec)return;
+  tombstone(_undoRec.id,false);
   DB.push(_undoRec);_undoRec=null;persist();
   updateCount();renderHero();renderList();
   const el=document.getElementById('toast');el.className=el.className.replace('show','').trim();

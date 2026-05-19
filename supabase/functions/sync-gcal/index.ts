@@ -207,6 +207,12 @@ Deno.serve(async (req: Request) => {
 
     const rows = items
       .filter((ev) => {
+        // Skip cancelled events. The Calendar API marks them status
+        // "cancelled" (incl. cancelled single instances of a recurring
+        // series); some people instead keep the event but rename the
+        // title "Cancelled: ...". Neither should be imported.
+        if (ev.status === "cancelled") return false;
+        if (/cancell?ed/i.test(ev.summary || "")) return false;
         const hay = ((ev.summary || "") + " " + (ev.description || ""))
           .toLowerCase();
         return kws.some((k) => hay.includes(k));
@@ -218,6 +224,14 @@ Deno.serve(async (req: Request) => {
       env("SUPABASE_SERVICE_ROLE_KEY"),
       { auth: { persistSession: false } },
     );
+
+    // Tombstones: ids the user deleted in the app. Deletion is a user
+    // intent — like an edit — so the calendar must never resurrect a
+    // user-deleted meeting on the next sync.
+    const { data: tomb } = await sb.from("deleted_sync")
+      .select("id").eq("owner", owner);
+    const dead = new Set((tomb || []).map((r: any) => r.id));
+    const live = rows.filter((r) => !dead.has(r.id));
 
     // Merge strategy — the APP is authoritative. New calendar events are
     // inserted. For events already synced before:
@@ -231,21 +245,21 @@ Deno.serve(async (req: Request) => {
     // Manually-created rows (non-"gcal:" ids) are not returned by the
     // calendar at all, so they are never matched and never touched.
     let inserted = 0, updated = 0, skipped = 0;
-    if (rows.length) {
-      const ids = rows.map((r) => r.id);
+    if (live.length) {
+      const ids = live.map((r) => r.id);
       const { data: exist, error: e1 } = await sb.from("meetings")
         .select("id,edited").in("id", ids);
       if (e1) throw new Error("select existing failed: " + e1.message);
       const exById = new Map(
         (exist || []).map((r: any) => [r.id, r]),
       );
-      const fresh = rows.filter((r) => !exById.has(r.id));
+      const fresh = live.filter((r) => !exById.has(r.id));
       if (fresh.length) {
         const { error } = await sb.from("meetings").insert(fresh);
         if (error) throw new Error("insert failed: " + error.message);
         inserted = fresh.length;
       }
-      for (const r of rows.filter((x) => exById.has(x.id))) {
+      for (const r of live.filter((x) => exById.has(x.id))) {
         const ex = exById.get(r.id);
         // App edits win: an edited row is frozen against the calendar.
         if (ex && ex.edited === true) { skipped++; continue; }
