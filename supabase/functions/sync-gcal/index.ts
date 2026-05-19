@@ -191,6 +191,10 @@ Deno.serve(async (req: Request) => {
         u.searchParams.set("singleEvents", "true");
         u.searchParams.set("orderBy", "startTime");
         u.searchParams.set("maxResults", "250");
+        // Return cancelled events too (status:"cancelled"), otherwise an
+        // instance cancelled AFTER it was imported just vanishes from the
+        // results and its stale row can never be detected/removed.
+        u.searchParams.set("showDeleted", "true");
         if (pageToken) u.searchParams.set("pageToken", pageToken);
         const r = await fetch(u, {
           headers: { Authorization: "Bearer " + token },
@@ -205,19 +209,27 @@ Deno.serve(async (req: Request) => {
       if (items.length >= 5000) break;
     }
 
+    const kwMatch = (ev: any) => {
+      const hay = ((ev.summary || "") + " " + (ev.description || ""))
+        .toLowerCase();
+      return kws.some((k) => hay.includes(k));
+    };
+    // A meeting is cancelled if the Calendar API says status:"cancelled"
+    // (we request showDeleted) OR the title contains "cancel" in any form
+    // (cancel / canceled / cancelled / Canceled: ..., case-insensitive).
+    // Such meetings must not be imported, and any row imported BEFORE it
+    // was cancelled must be removed.
+    const isCancelled = (ev: any) =>
+      ev.status === "cancelled" || /cancel/i.test(ev.summary || "");
+
     const rows = items
-      .filter((ev) => {
-        // Skip cancelled events. The Calendar API marks them status
-        // "cancelled" (incl. cancelled single instances of a recurring
-        // series); some people instead keep the event but rename the
-        // title "Cancelled: ...". Neither should be imported.
-        if (ev.status === "cancelled") return false;
-        if (/cancell?ed/i.test(ev.summary || "")) return false;
-        const hay = ((ev.summary || "") + " " + (ev.description || ""))
-          .toLowerCase();
-        return kws.some((k) => hay.includes(k));
-      })
+      .filter((ev) => !isCancelled(ev) && kwMatch(ev))
       .map((ev) => rowFromEvent(ev, owner));
+
+    const cancelledIds = items
+      .filter((ev) =>
+        ev.id && isCancelled(ev) && (ev.status === "cancelled" || kwMatch(ev)))
+      .map((ev) => "gcal:" + ev.id);
 
     const sb = createClient(
       env("SUPABASE_URL"),
@@ -232,6 +244,24 @@ Deno.serve(async (req: Request) => {
       .select("id").eq("owner", owner);
     const dead = new Set((tomb || []).map((r: any) => r.id));
     const live = rows.filter((r) => !dead.has(r.id));
+
+    // Remove rows whose calendar event is now cancelled — only non-edited
+    // rows (an edited row is frozen; the user deletes it themselves). Also
+    // tombstone them so a stale client push can't resurrect them.
+    let removed = 0;
+    if (cancelledIds.length) {
+      const { data: cx } = await sb.from("meetings")
+        .select("id,edited").in("id", cancelledIds);
+      const killable = (cx || [])
+        .filter((r: any) => r.edited !== true)
+        .map((r: any) => r.id);
+      if (killable.length) {
+        await sb.from("meetings").delete().in("id", killable);
+        await sb.from("deleted_sync")
+          .upsert(killable.map((id: string) => ({ id, owner })));
+        removed = killable.length;
+      }
+    }
 
     // Merge strategy — the APP is authoritative. New calendar events are
     // inserted. For events already synced before:
@@ -287,6 +317,7 @@ Deno.serve(async (req: Request) => {
         inserted,
         updated,
         skipped,
+        removed,
       }),
       { headers: { ...CORS, "Content-Type": "application/json" } },
     );
