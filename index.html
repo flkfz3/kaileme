@@ -297,6 +297,7 @@
     .tl-axis{width:34px;font-size:9px}
     .tl-col .tl-hdr{font-size:10px;padding:3px 2px}
     .tlb{font-size:10px;padding:2px 4px}
+    .tlb-resize{height:14px} /* fatter touch target on phones */
     .tl-allday{padding:3px;min-height:14px}
     .cal-tabs button{padding:2px 7px;font-size:10.5px}
   }
@@ -340,8 +341,14 @@
   .tlb.dragging{opacity:.7;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:10}
   .tlb .tnm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
   .tlb .tmt{opacity:.85;font-size:9.5px}
-  .tlb-resize{position:absolute;left:0;right:0;height:8px;cursor:ns-resize;
+  .tlb-resize{position:absolute;left:0;right:0;height:10px;cursor:ns-resize;
     touch-action:none;z-index:2}
+  .tl-now{position:absolute;left:0;right:0;height:0;border-top:1.5px solid var(--accent);
+    pointer-events:none;z-index:5}
+  .tl-now::before{content:'';position:absolute;left:-4px;top:-4px;width:8px;height:8px;
+    border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px rgba(255,255,255,.7)}
+  .tlb-seg{display:inline-block;margin-left:4px;font-size:11px;opacity:.85}
+  .tl-body{cursor:cell}   /* hint that empty slots are clickable */
   .tlb-resize.top{top:0}
   .tlb-resize.bottom{bottom:0}
   .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
@@ -551,6 +558,7 @@
       </div>
       <div class="filters" style="margin-bottom:14px;align-items:center">
         <div class="seg" id="qrSeg">
+          <button data-qr="week" onclick="quickRange('week')" data-i18n="qr.week"></button>
           <button data-qr="month" onclick="quickRange('month')" data-i18n="qr.month"></button>
           <button data-qr="30" onclick="quickRange('30')" data-i18n="qr.30"></button>
           <button data-qr="year" onclick="quickRange('year')" data-i18n="qr.year"></button>
@@ -649,7 +657,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20m';
+const BUILD='2026-05-20n';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -764,7 +772,7 @@ const I18N={
   'monShort.5':'May','monShort.6':'Jun','monShort.7':'Jul','monShort.8':'Aug',
   'monShort.9':'Sep','monShort.10':'Oct','monShort.11':'Nov','monShort.12':'Dec',
   'mlab':'{m} {y}',
-  'qr.month':'This month','qr.30':'Last 30 days','qr.year':'This year','qr.all':'All',
+  'qr.week':'This week','qr.month':'This month','qr.30':'Last 30 days','qr.year':'This year','qr.all':'All',
   'view.list':'List','view.cal':'Calendar',
   'day.empty':'No meetings on this day',
   'rec.title':'Record','rec.close':'Close',
@@ -880,7 +888,7 @@ const I18N={
   'monShort.5':'5月','monShort.6':'6月','monShort.7':'7月','monShort.8':'8月',
   'monShort.9':'9月','monShort.10':'10月','monShort.11':'11月','monShort.12':'12月',
   'mlab':'{y}年{m}',
-  'qr.month':'本月','qr.30':'近30天','qr.year':'今年','qr.all':'全部',
+  'qr.week':'本周','qr.month':'本月','qr.30':'近30天','qr.year':'今年','qr.all':'全部',
   'view.list':'列表','view.cal':'月历',
   'day.empty':'这天没有会议',
   'rec.title':'记录详情','rec.close':'关闭',
@@ -1265,6 +1273,16 @@ async function saveRecord(){
   if(i>=0){
     rec.sourceId=DB[i].sourceId||'';
     const old=DB[i];
+    // Preserve per-day segments when the form's start/end/dates are
+    // unchanged (so just opening the form and clicking Save doesn't wipe
+    // per-day timeline edits). Any time/date change clears segments — the
+    // form value then takes over for every day.
+    if(old.segments && old.startTime===rec.startTime
+       && old.endTime===rec.endTime && old.dateStart===rec.dateStart
+       && (old.dateEnd||'')===(rec.dateEnd||'')){
+      rec.segments=old.segments;
+    }
+    rec.groupId=old.groupId||'';
     // Only a venue (mode/detail) change can fan out to same-name records.
     // notes & role stay unique per record — never bulk-applied / no prompt.
     const venueChanged=old.venueMode!==rec.venueMode
@@ -1483,7 +1501,12 @@ let _lpg=1,_lsig='',_lday='',_view='list',_qr30=false;const LPG=40;
 // in hours; meetings with no time recorded contribute 0). All bar charts,
 // the heatmap and the busiest-day insight use this setting.
 let _statMetric='count';
-function setStatMetric(m){if(_statMetric===m)return;_statMetric=m;renderStat();}
+function setStatMetric(m){
+  if(_statMetric===m)return;
+  _statMetric=m;
+  renderHero();   // hero stats follow the metric too
+  renderStat();
+}
 // Per-record value used for every aggregation in renderStat / renderHeatmap.
 function statVal(r){
   return _statMetric==='hours' ? (durMin(r)||0)/60 : 1;
@@ -1677,14 +1700,26 @@ function tlBlocks(iso){
     let bottom=top+(em-sm)/60*TL_HPX;
     if(bottom>TL_BODY_PX)bottom=TL_BODY_PX;
     const h=Math.max(18,bottom-top);
+    // A segmented block gets a small badge so the user can see at a glance
+    // that this day's slot was set independently of the rest of the event.
+    const segged=segs?'<span class="tlb-seg" title="'
+      +esc(LANG==='zh'?'此事件多日分别设置':'per-day segmented')+'">⚏</span>':'';
     blocks+=`<div class="tlb" data-rid="${r.id}" data-iso="${iso}"
       style="top:${top}px;height:${h}px;background:${tlbColor(r.type)}"
       title="${esc(r.name)} ${st}${en?'–'+en:''}">
       <div class="tlb-resize top"></div>
-      <span class="tnm">${esc(r.name)}</span>
+      <span class="tnm">${esc(r.name)}${segged}</span>
       <span class="tmt">${st}${en?'–'+en:''}</span>
       <div class="tlb-resize bottom"></div></div>`;
   });
+  // "Now" indicator on today's column, subtle accent-coloured line + dot.
+  const todayISO=lDate(new Date());
+  if(iso===todayISO){
+    const now=new Date();
+    const m=now.getHours()*60+now.getMinutes();
+    const top=tlPosMin(m)/60*TL_HPX;
+    blocks+=`<div class="tl-now" style="top:${top}px"></div>`;
+  }
   return{blocks,allday};
 }
 // Make every column's all-day strip the same height (max across the week)
@@ -1732,6 +1767,30 @@ function tlInstallDrag(){
   document.querySelectorAll('.tlb-resize').forEach(el=>{
     el.addEventListener('pointerdown', tlResizeStart);
   });
+  // Click on an empty area of any .tl-body → open the Add form pre-filled
+  // with that day + the clicked time slot (snapped to 30 min).
+  document.querySelectorAll('.tl-cols .tl-body').forEach(b=>{
+    b.addEventListener('click', tlSlotClick);
+  });
+}
+function tlSlotClick(e){
+  if(e.target.closest('.tlb, .tlb-resize, .tl-allday-block'))return;
+  const body=e.currentTarget;
+  const col=body.closest('.tl-col');if(!col)return;
+  const iso=col.dataset.iso||lDate(new Date());
+  const rect=body.getBoundingClientRect();
+  const y=Math.max(0,e.clientY-rect.top);
+  // Snap to nearest 30 min; default duration 60 min.
+  const offMin=Math.round(y/TL_HPX*60/30)*30;
+  const startMin=((offMin+TL_H0*60)%1440+1440)%1440;
+  const fmt=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+  switchTab('add');
+  resetForm();
+  document.getElementById('f-dateStart').value=iso;
+  document.getElementById('f-startTime').value=fmt(startMin);
+  document.getElementById('f-endTime').value=fmt((startMin+60)%1440);
+  const tzEl=document.getElementById('f-tz');if(tzEl)tzEl.value=defaultTz();
+  const nm=document.getElementById('f-name');if(nm)setTimeout(()=>nm.focus(),60);
 }
 function tlBlockClick(e){
   const el=e.currentTarget;
@@ -2062,7 +2121,22 @@ function openRec(id){
   _recOpener=document.activeElement;
   const vp=r.venueMode?`<span class="pill ${r.venueMode==='线上'?'on':'off'}">${r.venueMode==='线上'?t('online'):t('offline')}</span> `:'';
   const tl=timeLine(r);
-  let bd=`<div class="dr-sec"><div class="k">${t('c.date')}</div><div class="v">${esc(fmtDate(r))}${tl?`<div class="meta" style="margin-top:4px">${tl}</div>`:''}</div></div>
+  // For a multi-day event with per-day segments, list each day's own time
+  // under the date line so the drawer reflects what the calendar shows.
+  let segHtml='';
+  const segs=rowSegs(r);
+  if(segs&&segs.length){
+    const wdN=LANG==='zh'?['日','一','二','三','四','五','六']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const lines=segs.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''))
+      .map(s=>{
+        const d=new Date(s.date+'T00:00:00');
+        const wn=wdN[d.getDay()];
+        const tt=s.startTime?(s.startTime+(s.endTime?'–'+s.endTime:'')):(LANG==='zh'?'全天':'all-day');
+        return `<div style="font-size:13px"><span class="meta" style="margin-right:8px">${esc(s.date)} (${LANG==='zh'?'周':''}${wn})</span>${esc(tt)}</div>`;
+      }).join('');
+    segHtml=`<div class="meta" style="margin-top:6px">${LANG==='zh'?'每日时段':'Per-day times'}</div>${lines}`;
+  }
+  let bd=`<div class="dr-sec"><div class="k">${t('c.date')}</div><div class="v">${esc(fmtDate(r))}${tl?`<div class="meta" style="margin-top:4px">${tl}</div>`:''}${segHtml}</div></div>
     <div class="dr-sec"><div class="k">${t('d.type')}</div><div class="v">${esc(typeLabel(r.type))}</div></div>
     <div class="dr-sec"><div class="k">${t('d.venue')}</div><div class="v">${vp}${r.venueDetail?linkify(r.venueDetail):'—'}</div></div>`;
   if(r.role)bd+=`<div class="dr-sec"><div class="k">${t('d.role')}</div><div class="v">${esc(r.role)}</div></div>`;
@@ -2089,10 +2163,19 @@ function dupRecord(id){
   persist();updateCount();renderHero();
   closeRec();renderList();toast(t('msg.duped'),'ok');
 }
+// 'week' is handled by jumping straight to the calendar week view of this
+// week — for "all meetings this week" the timeline is much more useful than
+// a list, and we already have the rendering for it.
 function quickRange(k){
   const now=new Date();
   const ys=document.getElementById('flt-year'),ms=document.getElementById('flt-month');
   _lday='';
+  if(k==='week'){
+    setView('cal');_calView='week';_calDay=lDate(now);
+    document.querySelectorAll('#qrSeg button[data-qr]').forEach(b=>
+      b.classList.toggle('on',b.dataset.qr===k));
+    renderCalendar();return;
+  }
   if(k==='month'){ys.value=String(now.getFullYear());ms.value=String(now.getMonth()+1);}
   else if(k==='year'){ys.value=String(now.getFullYear());ms.value='';}
   else if(k==='30'){
@@ -2159,27 +2242,35 @@ function statData(){
   const sy=statYear();
   const D=sy?DB.filter(r=>(r.dateStart||'').startsWith(sy)):DB;
   const yr=sy||new Date().getFullYear().toString();
+  // Each card's value follows the active metric — counts when 'count',
+  // total hours when 'hours' — so the toggle is single-source-of-truth.
+  const sum=arr=>arr.reduce((s,r)=>s+statVal(r),0);
   return[
-    {n:D.length,l:t('st.total'),go:sy?{year:sy}:{}},
-    {n:D.filter(r=>r.type==='conference').length,l:t('st.conf'),go:{type:'conference',year:sy}},
-    {n:D.filter(r=>r.type==='组内报告'||['oral','poster'].includes(r.role)).length,
+    {n:sum(D),l:t('st.total'),go:sy?{year:sy}:{}},
+    {n:sum(D.filter(r=>r.type==='conference')),l:t('st.conf'),
+     go:{type:'conference',year:sy}},
+    {n:sum(D.filter(r=>r.type==='组内报告'||['oral','poster'].includes(r.role))),
      l:t('st.talks'),go:{type:'组内报告',year:sy}},
-    {n:DB.filter(r=>(r.dateStart||'').startsWith(yr)).length,
+    {n:sum(DB.filter(r=>(r.dateStart||'').startsWith(yr))),
      l:t('st.year',{y:yr}),go:{year:yr}}
   ];
 }
 function renderHero(){
   const d=statData(),box=document.getElementById('heroStats');
   box.innerHTML=d.map(s=>
-    `<div class="hs"><span class="n">0</span><span class="l">${s.l}</span></div>`).join('');
-  [...box.querySelectorAll('.n')].forEach((el,i)=>countUp(el,d[i].n));
+    `<div class="hs"><span class="n">0</span><span class="l">${esc(s.l)}</span></div>`).join('');
+  [...box.querySelectorAll('.n')].forEach((el,i)=>{
+    if(_statMetric==='hours')el.textContent=fmtHours(d[i].n);
+    else countUp(el,d[i].n);
+  });
 }
 function cbars(c,items){
   if(!items.length){c.innerHTML=`<div class="empty" style="padding:24px">${t('nodata')}</div>`;return}
   const max=Math.max(0.0001,...items.map(i=>+i.v||0));
   c.innerHTML=items.map(i=>{
     const disp=(i.vd!==undefined&&i.vd!==null)?i.vd:i.v;
-    return `<div class="bar-row"${i.go
+    const tip=esc(i.k)+': '+esc(String(disp));
+    return `<div class="bar-row" title="${tip}"${i.go
         ?` style="cursor:pointer" onclick='goList(${JSON.stringify(i.go)})'`:''}>
       <div class="lab">${esc(i.k)}</div>
       <div class="bar-track"><div class="bar-fill" data-w="${(+i.v||0)/max*100}"></div></div>
@@ -2200,8 +2291,11 @@ function renderStat(){
   const d=statData();
   document.getElementById('statCards').innerHTML=d.map(s=>
     `<div class="stat" onclick='goList(${JSON.stringify(s.go||{})})'>`
-    +`<div class="n">0</div><div class="l">${s.l}</div></div>`).join('');
-  document.querySelectorAll('#statCards .n').forEach((el,i)=>countUp(el,d[i].n));
+    +`<div class="n">0</div><div class="l">${esc(s.l)}</div></div>`).join('');
+  document.querySelectorAll('#statCards .n').forEach((el,i)=>{
+    if(_statMetric==='hours')el.textContent=fmtHours(d[i].n);
+    else countUp(el,d[i].n);
+  });
   const yr=sy||new Date().getFullYear().toString();
   document.getElementById('monthTitle').textContent=t('monthly.y',{y:yr});
   // Monthly bars + busiest-day index, both metric-aware.
@@ -2256,15 +2350,6 @@ function renderStat(){
   cbars(document.getElementById('byYear'),Object.keys(by).sort().reverse()
     .map(k=>({k,v:by[k],vd:statFmt(by[k]),go:{year:k}})));
   // --- Time-based stats (added once meetings carry start/end times) ---
-  // Total hours card, appended after the existing count cards. Records with
-  // no time are skipped; a record with start_time only counts as 60 min.
-  const totMin=D.reduce((s,r)=>s+(durMin(r)||0),0);
-  const sc=document.getElementById('statCards');
-  if(sc){
-    sc.insertAdjacentHTML('beforeend',
-      `<div class="stat"><div class="n">${esc(fmtHours(totMin/60))}</div>`+
-      `<div class="l">${t('st.hours')}</div></div>`);
-  }
   // Hours by type — total hours per type, with units in the display label.
   const bth={};
   D.forEach(r=>{const m=durMin(r);if(m!=null)bth[r.type]=(bth[r.type]||0)+m});

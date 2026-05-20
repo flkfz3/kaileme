@@ -206,14 +206,22 @@ async function findSameDayMatch(
     end_time: string | null;
   } | null
 > {
+  // Match any row whose date range contains `date` (not just date_start) —
+  // a Zoom recap that arrives on day 2 of a multi-day conference still
+  // attaches to that single row instead of creating a duplicate mail: row.
   const { data } = await sb.from("meetings")
-    .select("id,name,notes,start_time,end_time")
+    .select("id,name,notes,start_time,end_time,date_start,date_end")
     .eq("owner", owner)
-    .eq("date_start", date)
+    .lte("date_start", date)
     .or("id.like.gcal:%,id.like.manual:%");
-  if (!data || !data.length) return null;
+  const rows = (data || []).filter((r: any) => {
+    const ds = (r.date_start || "").slice(0, 10);
+    const de = (r.date_end || ds).slice(0, 10);
+    return ds && ds <= date && date <= de;
+  });
+  if (!rows.length) return null;
   const cn = canonical.toLowerCase();
-  for (const r of data) {
+  for (const r of rows) {
     const rn = (r.name || "").toLowerCase();
     if (!rn) continue;
     if (rn === cn || rn.includes(cn) || cn.includes(rn)) return r;
