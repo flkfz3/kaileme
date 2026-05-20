@@ -305,6 +305,12 @@
   .cal-tabs button{padding:3px 10px;border:1px solid var(--line);background:#fff;
     border-radius:5px;cursor:pointer;color:var(--muted);font-weight:600;font-size:11.5px}
   .cal-tabs button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  /* generic segmented control (used by the stats metric toggle) */
+  .seg{display:inline-flex;gap:2px;border:1px solid var(--line);border-radius:7px;
+    padding:2px;background:#fff}
+  .seg button{padding:5px 12px;font-size:12.5px;background:transparent;border:none;
+    border-radius:5px;color:var(--muted);cursor:pointer;font-weight:600}
+  .seg button.on{background:var(--accent);color:#fff}
   .cal-nav{display:flex;align-items:center;gap:8px}
   .tl{display:flex;gap:5px;align-items:stretch;margin-top:8px}
   .tl-axis{width:42px;flex-shrink:0;font-size:10px;color:var(--muted);padding-top:46px}
@@ -563,8 +569,15 @@
   </section>
 
   <section id="tab-stat" class="hidden">
-    <div class="filters"><div class="field"><label data-i18n="stat.year"></label>
-      <select id="stat-year" onchange="renderStat()"></select></div></div>
+    <div class="filters">
+      <div class="field"><label data-i18n="stat.year"></label>
+        <select id="stat-year" onchange="renderStat()"></select></div>
+      <div class="field"><label data-i18n="stat.metric"></label>
+        <div class="seg" id="metricSeg">
+          <button class="on" onclick="setStatMetric('count')" data-i18n="st.count"></button>
+          <button onclick="setStatMetric('hours')" data-i18n="st.hours"></button>
+        </div></div>
+    </div>
     <div class="stats-cards" id="statCards"></div>
     <div class="card"><div class="chart-title" data-i18n="heatTitle"></div>
       <div id="heatmap" class="heatmap"></div>
@@ -636,7 +649,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20j';
+const BUILD='2026-05-20k';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -708,6 +721,7 @@ const I18N={
   byType:'By type',byRole:'Roles within conferences',nodata:'No data',
   byVenue:'Online vs in-person',byYear:'By year',
   byTypeHours:'Hours by type',byHourOfDay:'When meetings happen','st.hours':'Hours',
+  'st.count':'Count','stat.metric':'Metric',
   'stat.year':'Year','l.sort':'Sort',
   'sort.dd':'Date ↓ (newest)','sort.da':'Date ↑ (oldest)','sort.nm':'Name A–Z',
   'd.type':'Type','d.venue':'Location','d.role':'Role','d.notes':'Notes',
@@ -823,6 +837,7 @@ const I18N={
   byType:'按类型',byRole:'conference 里的角色',nodata:'无数据',
   byVenue:'线上 / 线下',byYear:'按年份',
   byTypeHours:'按类型(小时)',byHourOfDay:'会议时段分布','st.hours':'小时',
+  'st.count':'个数','stat.metric':'指标',
   'stat.year':'年份','l.sort':'排序',
   'sort.dd':'日期 ↓（新→旧）','sort.da':'日期 ↑（旧→新）','sort.nm':'名称 A–Z',
   'd.type':'类型','d.venue':'地点','d.role':'角色','d.notes':'备注',
@@ -1457,6 +1472,19 @@ function refreshYearFilter(){
   });
 }
 let _lpg=1,_lsig='',_lday='',_view='list',_qr30=false;const LPG=40;
+// Stats metric: 'count' (= one per meeting) or 'hours' (= meeting duration
+// in hours; meetings with no time recorded contribute 0). All bar charts,
+// the heatmap and the busiest-day insight use this setting.
+let _statMetric='count';
+function setStatMetric(m){if(_statMetric===m)return;_statMetric=m;renderStat();}
+// Per-record value used for every aggregation in renderStat / renderHeatmap.
+function statVal(r){
+  return _statMetric==='hours' ? (durMin(r)||0)/60 : 1;
+}
+// Hours rounded to one decimal for display; count stays integer.
+function statFmt(v){
+  return _statMetric==='hours' ? Math.round(v*10)/10 : v;
+}
 function linkify(s){return esc(s).replace(/(https?:\/\/[^\s<]+)/g,
   '<a href="$1" target="_blank" rel="noopener">$1</a>');}
 function monLabel(m){return t('mon.'+m)}
@@ -2022,18 +2050,32 @@ function clearFilters(){
 function goList(opt){
   opt=opt||{};
   switchTab('list');
+  // A whole-day or whole-month filter opens the corresponding calendar view
+  // (more useful than a flat list). A type / role / year-only filter stays
+  // in the list view as before.
+  if(opt.day){
+    setView('cal');
+    _calView='day';_calDay=opt.day;
+    renderCalendar();
+    return;
+  }
+  if(opt.year && opt.month && !opt.type){
+    setView('cal');
+    _calView='month';
+    _calY=parseInt(opt.year,10);
+    _calM=parseInt(opt.month,10)-1;
+    _calDay=opt.year+'-'+String(opt.month).padStart(2,'0')+'-01';
+    renderCalendar();
+    return;
+  }
   setView('list');
   document.getElementById('flt-type').value=opt.type||'';
   document.getElementById('flt-q').value=opt.q||'';
   const ys=document.getElementById('flt-year');
   const ms=document.getElementById('flt-month');
-  if(opt.day){
-    _lday=opt.day;if(ys)ys.value='';if(ms)ms.value='';
-  }else{
-    _lday='';
-    if(ys)ys.value=opt.year||'';
-    if(ms)ms.value=opt.month?String(opt.month):'';
-  }
+  _lday='';
+  if(ys)ys.value=opt.year||'';
+  if(ms)ms.value=opt.month?String(opt.month):'';
   _qr30=false;
   document.querySelectorAll('#qrSeg button[data-qr]').forEach(b=>b.classList.remove('on'));
   _lsig='__';renderList();
@@ -2079,6 +2121,12 @@ function cbars(c,items){
 }
 function renderStat(){
   refreshYearFilter();
+  // Reflect the current metric on the segmented toggle.
+  const segBtns=document.querySelectorAll('#metricSeg button');
+  if(segBtns.length===2){
+    segBtns[0].classList.toggle('on',_statMetric==='count');
+    segBtns[1].classList.toggle('on',_statMetric==='hours');
+  }
   const sy=statYear();
   const D=sy?DB.filter(r=>(r.dateStart||'').startsWith(sy)):DB;
   const d=statData();
@@ -2088,43 +2136,52 @@ function renderStat(){
   document.querySelectorAll('#statCards .n').forEach((el,i)=>countUp(el,d[i].n));
   const yr=sy||new Date().getFullYear().toString();
   document.getElementById('monthTitle').textContent=t('monthly.y',{y:yr});
+  // Monthly bars + busiest-day index, both metric-aware.
   const mc=new Array(12).fill(0);
-  const dayCnt={};
+  const dayAcc={};
   DB.forEach(r=>{
     const ds=(r.dateStart||'');
-    if(ds.startsWith(yr)){
-      const m=parseInt(ds.slice(5,7),10)-1;if(m>=0&&m<12)mc[m]++;
-      const dd=ds.slice(0,10);if(dd)dayCnt[dd]=(dayCnt[dd]||0)+1;
-    }});
-  const mmax=Math.max(1,...mc);
-  document.getElementById('monthChart').innerHTML=mc.map((v,i)=>
-    `<div class="mbar" style="cursor:pointer"
-      title="${esc(monLabel(i+1))} ${yr}: ${v}"
+    if(!ds.startsWith(yr))return;
+    const v=statVal(r);if(!v)return;
+    const m=parseInt(ds.slice(5,7),10)-1;if(m>=0&&m<12)mc[m]+=v;
+    const dd=ds.slice(0,10);if(dd)dayAcc[dd]=(dayAcc[dd]||0)+v;
+  });
+  const mmax=Math.max(0.0001,...mc);
+  document.getElementById('monthChart').innerHTML=mc.map((v,i)=>{
+    const disp=statFmt(v);
+    return `<div class="mbar" style="cursor:pointer"
+      title="${esc(monLabel(i+1))} ${yr}: ${disp}"
       onclick='goList(${JSON.stringify({year:yr,month:i+1})})'>
-    <div class="mv">${v||''}</div><div class="fill" data-h="${v/mmax*100}"></div>
-    <div class="mn">${monShort(i+1)}</div></div>`).join('');
+    <div class="mv">${disp||''}</div><div class="fill" data-h="${v/mmax*100}"></div>
+    <div class="mn">${monShort(i+1)}</div></div>`;}).join('');
   requestAnimationFrame(()=>document.querySelectorAll('#monthChart .fill')
     .forEach(f=>f.style.height=f.dataset.h+'%'));
-  // Busiest day insight
+  // Busiest day (by selected metric; meetings with no time contribute 0
+  // when metric=hours, so they don't push a no-time-filled day to the top).
   let bDay='',bN=0;
-  for(const k in dayCnt)if(dayCnt[k]>bN){bN=dayCnt[k];bDay=k;}
+  for(const k in dayAcc)if(dayAcc[k]>bN){bN=dayAcc[k];bDay=k;}
   const bel=document.getElementById('busiestStat');
   if(bel)bel.innerHTML=`<span class="bz-k">${t('busiest')}</span> `
-    +(bDay?`<span class="bz-v" style="cursor:pointer" onclick='goList({day:"${bDay}"})'>${esc(bDay)} · ${bN}</span>`
+    +(bDay?`<span class="bz-v" style="cursor:pointer" onclick='goList({day:"${bDay}"})'>${esc(bDay)} · ${statFmt(bN)}</span>`
           :`<span class="bz-v">${t('busiest.none')}</span>`);
-  const agg=fn=>{const o={};D.forEach(r=>{const k=fn(r);if(k!=null&&k!=='')o[k]=(o[k]||0)+1});return o;};
+  // Generic aggregator that uses the current metric.
+  const agg=fn=>{const o={};D.forEach(r=>{const k=fn(r);if(k==null||k==='')return;
+    const v=statVal(r);if(v)o[k]=(o[k]||0)+v;});return o;};
   const bt=agg(r=>r.type);
   cbars(document.getElementById('byType'),Object.keys(bt).sort((a,b)=>bt[b]-bt[a])
-    .map(k=>({k:typeLabel(k),v:bt[k],go:{type:k,year:sy}})));
+    .map(k=>({k:typeLabel(k),v:statFmt(bt[k]),go:{type:k,year:sy}})));
   const br=agg(r=>r.type==='conference'?(r.role||'(—)'):null);
   cbars(document.getElementById('byRole'),Object.keys(br).sort((a,b)=>br[b]-br[a])
-    .map(k=>({k,v:br[k]})));
+    .map(k=>({k,v:statFmt(br[k])})));
   const bv=agg(r=>r.venueMode||null);
   cbars(document.getElementById('byVenue'),Object.keys(bv).sort((a,b)=>bv[b]-bv[a])
-    .map(k=>({k:k==='线上'?t('online'):k==='线下'?t('offline'):k,v:bv[k]})));
-  const by={};DB.forEach(r=>{const k=(r.dateStart||'').slice(0,4);if(k)by[k]=(by[k]||0)+1});
+    .map(k=>({k:k==='线上'?t('online'):k==='线下'?t('offline'):k,v:statFmt(bv[k])})));
+  const by={};DB.forEach(r=>{
+    const k=(r.dateStart||'').slice(0,4);if(!k)return;
+    const v=statVal(r);if(v)by[k]=(by[k]||0)+v;
+  });
   cbars(document.getElementById('byYear'),Object.keys(by).sort().reverse()
-    .map(k=>({k,v:by[k],go:{year:k}})));
+    .map(k=>({k,v:statFmt(by[k]),go:{year:k}})));
   // --- Time-based stats (added once meetings carry start/end times) ---
   // Total hours card, appended after the existing count cards. Records with
   // no time are skipped; a record with start_time only counts as 60 min.
@@ -2155,8 +2212,15 @@ function renderStat(){
 function renderHeatmap(){
   const box=document.getElementById('heatmap');if(!box)return;
   const cnt={};
-  DB.forEach(r=>eachDay((r.dateStart||'').slice(0,10),(r.dateEnd||'').slice(0,10),
-    iso=>cnt[iso]=(cnt[iso]||0)+1));
+  if(_statMetric==='hours'){
+    // Hours mode: a meeting's hours live at its start date; no eachDay
+    // (otherwise a multi-day event without per-day times would multiply).
+    DB.forEach(r=>{const ds=(r.dateStart||'').slice(0,10);if(!ds)return;
+      const v=statVal(r);if(v)cnt[ds]=(cnt[ds]||0)+v;});
+  } else {
+    DB.forEach(r=>eachDay((r.dateStart||'').slice(0,10),(r.dateEnd||'').slice(0,10),
+      iso=>cnt[iso]=(cnt[iso]||0)+1));
+  }
   const max=Math.max(1,...Object.values(cnt));
   const lvl=v=>!v?'':v>=max*.75?' l4':v>=max*.5?' l3':v>=max*.25?' l2':' l1';
   const end=new Date();end.setHours(0,0,0,0);
@@ -2172,8 +2236,9 @@ function renderHeatmap(){
     for(let dy=0;dy<7;dy++){
       const iso=lDate(cur);
       const v=cur<=end?(cnt[iso]||0):-1;
+      const lbl=v>0?statFmt(v):v;
       grid+=v<0?'<div class="hm-c" style="visibility:hidden"></div>'
-        :`<div class="hm-c${lvl(v)}" title="${iso}: ${v}"`
+        :`<div class="hm-c${lvl(v)}" title="${iso}: ${lbl}"`
           +(v>0?` style="cursor:pointer" onclick="goList({day:'${iso}'})"`:'')
           +`></div>`;
       cur.setDate(cur.getDate()+1);
