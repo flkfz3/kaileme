@@ -634,7 +634,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20g';
+const BUILD='2026-05-20h';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -1035,8 +1035,10 @@ async function pushCloud(){
     // missing locally, OR when its id is tombstoned (gcal:/mail: deletes).
     const {data:tombs}=await sb.from('deleted_sync').select('id');
     const tombIds=new Set((tombs||[]).map(r=>r.id));
+    // App-owned id prefixes (manual:, seg:) are reconcile-deleted when
+    // missing locally. gcal:/mail: deletions go through tombstones only.
     const del=(data||[]).map(r=>r.id)
-      .filter(id=>!local.has(id)&&(/^manual:/.test(id)||tombIds.has(id)));
+      .filter(id=>!local.has(id)&&(/^(manual|seg):/.test(id)||tombIds.has(id)));
     if(del.length)await sb.from('meetings').delete().in('id',del);
     // Splice the cloud's Zoom recap block + inbound-outlook's time into our
     // upsert payload for gcal:/mail: rows the user hasn't explicitly edited,
@@ -1307,19 +1309,26 @@ function splitMultiDay(r){
   const ds=new Date(r.dateStart+'T00:00:00');
   const de=new Date((r.dateEnd||r.dateStart)+'T00:00:00');
   if(de<=ds)return [r];
-  const gid=r.groupId||r.id;
+  // group_id is a fresh stable label that does NOT reference any specific
+  // row (the original row is about to be tombstoned). split row ids are
+  // deterministic — `seg:<group_id>:<YYYY-MM-DD>` — so the same split done
+  // on two devices yields the same ids and upserts merge cleanly instead
+  // of doubling up.
+  const gid=r.groupId||('g:'+uid());
   const splits=[];
   for(const d=new Date(ds); d<=de; d.setDate(d.getDate()+1)){
+    const dayISO=lDate(d);
     splits.push({...r,
-      id:'manual:'+uid(),
-      dateStart:lDate(d),
+      id:'seg:'+gid+':'+dayISO,
+      dateStart:dayISO,
       dateEnd:'',
       groupId:gid,
       sourceId:'',
       createdAt:new Date().toISOString(),
       edited:true});
   }
-  DB=DB.filter(x=>x.id!==r.id);
+  const newIds=new Set(splits.map(s=>s.id));
+  DB=DB.filter(x=>x.id!==r.id && !newIds.has(x.id));
   splits.forEach(s=>DB.push(s));
   if(isSynced(r.id))tombstone(r.id,true);
   return splits;
