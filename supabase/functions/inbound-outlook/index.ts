@@ -1,21 +1,16 @@
-// Supabase Edge Function: inbound-outlook  (STUB — plumbing only)
+// Supabase Edge Function: inbound-outlook
 //
-// Receives a forwarded Outlook "meeting summary" email (POSTed by a Power
-// Automate flow, or by an inbound-parse service behind an auto-forward rule)
-// and stores it verbatim as a `mail:<hash>` row in `meetings`, so we can:
-//   1. confirm the whole pipe (mailbox → feeder → function → DB) works, and
-//   2. capture REAL sample emails to design the parser + calendar match key.
-// It deliberately does NOT parse, classify, or match yet. Once we have real
-// samples those steps replace the verbatim dump.
+// Receives a forwarded Zoom recap email (POSTed by an Apps Script running
+// on the user's Gmail, where her UGA Outlook auto-redirects matching mail),
+// parses it, and either updates the same-day meeting row in `meetings` or
+// creates a new one. The recap email's existence = the meeting really
+// happened, so a record is ALWAYS produced.
 //
-// Auth: a shared secret (NOT a Supabase JWT — deploy with --no-verify-jwt).
-// Send it as `?key=<secret>` or header `x-webhook-secret: <secret>`.
+// Auth: shared secret `INBOUND_SECRET` as `?key=` or `x-webhook-secret`.
+// Deploy with `--no-verify-jwt`.
 //
-// Required secrets (supabase secrets set KEY=value):
-//   INBOUND_SECRET            shared secret the feeder must present
-//   OWNER_USER_ID             Supabase Auth user UUID (same as sync-gcal)
-//   SUPABASE_URL              auto-injected
-//   SUPABASE_SERVICE_ROLE_KEY auto-injected
+// Required secrets:
+//   INBOUND_SECRET, OWNER_USER_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -28,19 +23,200 @@ const CORS: Record<string, string> = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Small stable string hash → short base36, for a dedupe-friendly row id.
 function hash(s: string): string {
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
   return h.toString(36);
 }
 
-function jget(o: any, ...keys: string[]): string {
-  for (const k of keys) {
-    const v = k.split(".").reduce((a: any, p) => (a == null ? a : a[p]), o);
-    if (typeof v === "string" && v.trim()) return v.trim();
+// Read a top-level `KEY:` line from the plain-text payload Apps Script sends.
+function field(raw: string, key: string): string {
+  const m = raw.match(new RegExp("^" + key + ":[ \\t]*(.*)$", "im"));
+  return m ? m[1].trim() : "";
+}
+
+// Strip HTML to a readable plain-text block. Newlines preserved at block
+// boundaries; common entities decoded; whitespace collapsed.
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function to24h(h: number, ap: string): number {
+  const isPm = /p/i.test(ap);
+  if (isPm && h < 12) return h + 12;
+  if (!isPm && h === 12) return 0;
+  return h;
+}
+
+// Parse subject + body. Returns the canonical meeting name, the date the
+// meeting happened on, and the start time when the recap carries one.
+function parseRecap(
+  subject: string,
+  bodyHtml: string,
+  receivedISO: string,
+): {
+  rawName: string;
+  date: string;
+  startTime: string | null;
+  tz: string | null;
+} {
+  // 1. Meeting name from subject (strip Fw:/FW: chains).
+  const sc = subject.replace(/^(?:F[Ww]:\s*)+/, "").trim();
+  let rawName = sc;
+  let m: RegExpMatchArray | null;
+  if ((m = sc.match(/^Meeting assets for (.+?)\s+are ready!$/))) {
+    rawName = m[1].trim();
+  } else if ((m = sc.match(/^(.+?)的会议摘要/))) {
+    rawName = m[1].trim();
   }
-  return "";
+
+  // 2. Date + time from body. All anchors run on the HTML-stripped text so
+  // tags between markers (e.g. "<b>Sent:</b> Thursday, ...") never block a
+  // match. Anchor order is most-specific first.
+  const text = htmlToText(bodyHtml);
+  let date = "";
+  let startTime: string | null = null;
+  // A. English Lab Meeting card: "Date: MM/DD/YYYY HH:MM AM/PM"
+  if (
+    (m = text.match(
+      /Date:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i,
+    ))
+  ) {
+    const [, mo, dd, yr, hh, mm, ap] = m;
+    date = `${yr}-${pad(+mo)}-${pad(+dd)}`;
+    startTime = `${pad(to24h(+hh, ap))}:${mm}`;
+  } // B. English Project meeting banner: "<name> YYYY-MM-DD HH:MM AM/PM"
+  else if (
+    (m = text.match(
+      /(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i,
+    ))
+  ) {
+    const [, yr, mo, dd, hh, mm, ap] = m;
+    date = `${yr}-${mo}-${dd}`;
+    startTime = `${pad(to24h(+hh, ap))}:${mm}`;
+  } // C. Chinese: "以下项目的会议摘要： <name> (MM/DD/YYYY)" — date only
+  else if (
+    (m = text.match(
+      /以下项目的会议摘要[：:][^()]*?\((\d{1,2})\/(\d{1,2})\/(\d{4})\)/,
+    ))
+  ) {
+    const [, mo, dd, yr] = m;
+    date = `${yr}-${pad(+mo)}-${pad(+dd)}`;
+  } // D. Forwarded "Sent: <Day>, <Month> <D>, <Year> ..." header — for the
+  // English variant whose body carries only a "View meeting recap" link
+  // with no inline date. The Sent time is *after* the meeting, so we keep
+  // only the date and leave start_time null.
+  else if (
+    (m = text.match(
+      /Sent:\s*\w+,\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})\b/i,
+    ))
+  ) {
+    const months: Record<string, number> = {
+      january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+      july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+    };
+    const [, mo, dd, yr] = m;
+    date = `${yr}-${pad(months[mo.toLowerCase()])}-${pad(+dd)}`;
+  } // E. Last-resort fallback: the wrapper's received date.
+  else {
+    date = (receivedISO || new Date().toISOString()).slice(0, 10);
+  }
+
+  return {
+    rawName,
+    date,
+    startTime,
+    tz: startTime ? "America/New_York" : null,
+  };
+}
+
+// Map the raw name to a canonical type + canonical name. The classifier is
+// deliberately conservative — anything unrecognized falls into "其他" with
+// the name preserved (the user can re-classify in the app and the edit is
+// preserved by the freeze rule).
+function classify(
+  rawName: string,
+): { type: string; name: string } {
+  const n = rawName.trim();
+  const l = n.toLowerCase();
+  if (/^(bdal\s+)?lab\s+meeting$/i.test(n)) {
+    return { type: "组会", name: "lab meeting" };
+  }
+  if (/professor\s+xiaowei\s+yu/i.test(n)) {
+    return { type: "Project meeting", name: "Meeting with Professor Xiaowei Yu" };
+  }
+  if (/^meeting with /i.test(n) || /^meet with /i.test(n)) {
+    return { type: "Project meeting", name: n };
+  }
+  if (l.includes("seminar") || l.includes("colloquium") || l.includes("talk")) {
+    return { type: "seminar", name: n };
+  }
+  if (l.includes("conference")) {
+    return { type: "conference", name: n };
+  }
+  return { type: "其他", name: n };
+}
+
+// Find an existing same-day meeting row that this recap should attach to.
+// Excludes other `mail:` rows from the candidate pool (the recap should
+// never match itself). Prefers a name that contains, or is contained by,
+// the recap's canonical name (case-insensitive).
+async function findSameDayMatch(
+  sb: any,
+  owner: string,
+  date: string,
+  canonical: string,
+): Promise<{ id: string; name: string; notes: string | null } | null> {
+  const { data } = await sb.from("meetings")
+    .select("id,name,notes")
+    .eq("owner", owner)
+    .eq("date_start", date)
+    .or("id.like.gcal:%,id.like.manual:%");
+  if (!data || !data.length) return null;
+  const cn = canonical.toLowerCase();
+  for (const r of data) {
+    const rn = (r.name || "").toLowerCase();
+    if (!rn) continue;
+    if (rn === cn || rn.includes(cn) || cn.includes(rn)) return r;
+  }
+  return null;
+}
+
+const OPEN = "=== Zoom recap (auto, do not edit between markers) ===";
+const CLOSE = "=== /Zoom recap ===";
+
+// Insert or replace the recap block inside an existing notes value, so a
+// re-send overwrites its own block instead of stacking duplicates and any
+// text the user wrote outside the markers is preserved.
+function setRecapBlock(existing: string | null, recap: string): string {
+  const block = `${OPEN}\n${recap}\n${CLOSE}`;
+  const cur = (existing || "").trim();
+  if (!cur) return block;
+  const re = new RegExp(
+    OPEN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+      "[\\s\\S]*?" +
+      CLOSE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
+  if (re.test(cur)) return cur.replace(re, block);
+  return `${cur}\n\n${block}`;
 }
 
 Deno.serve(async (req: Request) => {
@@ -64,43 +240,31 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const owner = env("OWNER_USER_ID");
+    if (!owner) throw new Error("OWNER_USER_ID not set");
+
     const raw = await req.text();
-    let payload: any = null;
+    // Accept either Apps Script's plain-text convention or a JSON payload.
+    let subject = "", from = "", received = "", msgId = "", bodyHtml = "";
     try {
-      payload = JSON.parse(raw);
+      const j = JSON.parse(raw);
+      subject = j.subject || j.Subject || "";
+      from = j.from || j.From || "";
+      received = j.receivedDateTime || j.received || "";
+      msgId = j.internetMessageId || j.id || "";
+      bodyHtml = j.bodyHtml || j.body || "";
     } catch (_) {
-      payload = null; // not JSON — keep raw text only
+      subject = field(raw, "SUBJECT");
+      from = field(raw, "FROM");
+      received = field(raw, "RECEIVED");
+      msgId = field(raw, "MSGID");
+      const m = raw.match(/^BODYHTML:[ \t]*\n([\s\S]*)$/m);
+      bodyHtml = m ? m[1] : "";
     }
 
-    const subject = payload ? jget(payload, "subject", "Subject") : "";
-    const from = payload
-      ? jget(
-        payload,
-        "from",
-        "From",
-        "sender",
-        "from.emailAddress.address",
-        "sender.emailAddress.address",
-      )
-      : "";
-    const received = payload
-      ? jget(payload, "received", "receivedDateTime", "ReceivedDateTime", "date")
-      : "";
-    const dateStart = (received || new Date().toISOString()).slice(0, 10);
-    const msgId = payload
-      ? jget(payload, "internetMessageId", "id", "messageId", "InternetMessageId")
-      : "";
-
-    const id = "mail:" +
-      hash(msgId || (from + "|" + subject + "|" + received) || raw);
-
-    const dump = [
-      "From: " + (from || "?"),
-      "Subject: " + (subject || "?"),
-      "Received: " + (received || "?"),
-      "--- raw payload ---",
-      raw.slice(0, 8000),
-    ].join("\n");
+    const parsed = parseRecap(subject, bodyHtml, received);
+    const cls = classify(parsed.rawName);
+    const recapText = htmlToText(bodyHtml).slice(0, 10000);
 
     const sb = createClient(
       env("SUPABASE_URL"),
@@ -108,34 +272,75 @@ Deno.serve(async (req: Request) => {
       { auth: { persistSession: false } },
     );
 
-    // Upsert by id so a re-sent / retried email doesn't pile up duplicates.
+    const match = await findSameDayMatch(sb, owner, parsed.date, cls.name);
+    const mailId = "mail:" +
+      hash(msgId || (from + "|" + subject + "|" + received) || raw);
+
+    if (match) {
+      // Update the calendar/manual row. The recap is authoritative for time —
+      // overwrite when the recap carries one, leave the existing time alone
+      // when it doesn't (the Chinese template has no time). Preserve every
+      // other user-editable field; the freeze rule still protects them.
+      const patch: Record<string, unknown> = {
+        notes: setRecapBlock(match.notes, recapText),
+      };
+      if (parsed.startTime) {
+        patch.start_time = parsed.startTime;
+        patch.tz = parsed.tz;
+      }
+      const { error } = await sb.from("meetings").update(patch).eq("id", match.id);
+      if (error) throw new Error("update failed: " + error.message);
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          action: "updated",
+          id: match.id,
+          name: match.name,
+          date: parsed.date,
+          startTime: parsed.startTime,
+        }),
+        { headers: { ...CORS, "Content-Type": "application/json" } },
+      );
+    }
+
+    // No same-day match — create a new row keyed by message id so a re-send
+    // is idempotent (upsert on the same id, no duplicate).
     const { error } = await sb.from("meetings").upsert({
-      id,
-      type: null,
-      name: subject || "(outlook email)",
-      date_start: dateStart,
+      id: mailId,
+      type: cls.type,
+      name: cls.name,
+      date_start: parsed.date,
       date_end: null,
-      venue_mode: null,
-      venue_detail: null,
-      role: null,
-      notes: dump,
-      start_time: null,
+      start_time: parsed.startTime,
       end_time: null,
-      tz: null,
+      tz: parsed.tz,
+      venue_mode: "线上",
+      venue_detail: "Zoom",
+      role: null,
+      notes: setRecapBlock(null, recapText),
       source_id: msgId || null,
       created_at: new Date().toISOString(),
-      owner: env("OWNER_USER_ID"),
+      owner,
       edited: false,
     }, { onConflict: "id" });
     if (error) throw new Error("upsert failed: " + error.message);
 
-    return new Response(JSON.stringify({ ok: true, id }), {
-      headers: { ...CORS, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        action: "created",
+        id: mailId,
+        name: cls.name,
+        type: cls.type,
+        date: parsed.date,
+        startTime: parsed.startTime,
+      }),
+      { headers: { ...CORS, "Content-Type": "application/json" } },
+    );
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: String(e) }), {
-      status: 500,
-      headers: { ...CORS, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ ok: false, error: String(e) }),
+      { status: 500, headers: { ...CORS, "Content-Type": "application/json" } },
+    );
   }
 });
