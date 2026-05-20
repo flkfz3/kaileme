@@ -634,7 +634,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20e';
+const BUILD='2026-05-20f';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -2138,7 +2138,10 @@ document.addEventListener('keydown',e=>{
 });
 applyLang();resetForm();updateCount();renderHero();observeReveals();
 document.getElementById('buildStamp').textContent='build '+BUILD;
-// Default landing = calendar tab, week view centred on the current week.
+// Default landing = records tab + calendar view + week timeline on this week.
+// (HTML marks the "add meeting" tab active by default; without the
+// switchTab here the records pane stays hidden behind it.)
+switchTab('list');
 setView('cal');
 initCloud();refreshAuthGate();
 </script>
