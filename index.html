@@ -649,7 +649,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20l';
+const BUILD='2026-05-20m';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -786,7 +786,7 @@ const I18N={
   exportBackup:'导出备份', importBackup:'导入备份',
   tagline:'记录我参加的每一场会议与报告',
   'tab.add':'记录','tab.list':'列表','tab.stat':'统计','tab.cal':'Google 日历','tab.set':'设置',
-  'st.total':'总记录','st.conf':'conference','st.talks':'做过 talk/poster','st.year':'{y} 年',
+  'st.total':'总记录','st.conf':'学术会议','st.talks':'做过报告','st.year':'{y} 年',
   'f.type':'会议类型 *','f.name':'会议名称 *','f.nameph':'如 NeurIPS 2026 / 课题组周会',
   'f.repeat':'重复','f.repeatUntil':'重复至',
   'rep.none':'不重复','rep.weekday':'每个工作日（周一–周五）',
@@ -795,9 +795,9 @@ const I18N={
   'f.start':'开始日期 *','f.end':'结束日期（多天会议填，可空）','f.loc':'地点',
   'f.startTime':'开始时间（可空）','f.endTime':'结束时间（可空）','f.tz':'时区',
   'tz.et':'美东 ET','tz.pt':'美西 PT','tz.ct':'北京 CT',
-  'tzs.et':'ET','tzs.pt':'PT','tzs.ct':'北京(CT)',
+  'tzs.et':'ET','tzs.pt':'PT','tzs.ct':'北京',
   'tx.nextDay':'次日','tx.prevDay':'前一天','tx.bj':'北京','tx.usEast':'美东',
-  online:'线上',offline:'线下','f.role':'我的角色（仅 conference）',
+  online:'线上',offline:'线下','f.role':'我的角色（仅学术会议）',
   'f.notes':'备注（报告题目 / 认识的人 / 心得 / TODO）',
   'venueph.on':'线上平台（如 Zoom、Teams）','venueph.off':'线下地点（如 San Diego, CA）',
   save:'保存',cancelEdit:'取消编辑',
@@ -822,19 +822,19 @@ const I18N={
   heatTitle:'活跃度（近 12 个月）','heatLess':'少','heatMore':'多',
   'msg.migrated':'已上传 {n} 条到云',
   'ask.migrate':'把 {n} 条本地记录上传到云数据库？',
-  'ty.组会':'组会 (lab meeting)','ty.组内报告':'组内报告 (lab talk)',
-  'ty.Project meeting':'项目会议 (project meeting)','ty.seminar':'seminar',
-  'ty.conference':'conference','ty.其他':'其他',
+  'ty.组会':'组会','ty.组内报告':'组内报告',
+  'ty.Project meeting':'项目会议','ty.seminar':'学术报告',
+  'ty.conference':'学术会议','ty.其他':'其他',
   'ask.venueScope':'还有 {n} 条同名记录。把新地点应用到全部同名记录吗？',
   'venueAll':'全部修改','venueOne':'只改这一条',
-  'ro.none':'—','ro.oral':'oral（口头报告）','ro.poster':'poster（海报）',
-  'ro.attendee':'attendee（仅参会）','ro.chair':'chair（主持/分会主席）','ro.其他':'其他',
+  'ro.none':'—','ro.oral':'口头报告','ro.poster':'海报',
+  'ro.attendee':'参会','ro.chair':'主持人','ro.其他':'其他',
   'l.year':'年份','l.type':'类型','l.search':'搜索（名称/备注）','l.searchph':'关键词',
   all:'全部','c.date':'日期','c.type':'类型','c.name':'名称','c.loc':'地点',
   'c.role':'角色','c.notes':'备注',edit:'编辑',del:'删',
   'l.empty':'还没有记录，去「记录」加一条吧',
   monthly:'月度分布','monthly.y':'{y} 年月度分布',
-  byType:'按类型',byRole:'conference 里的角色',nodata:'无数据',
+  byType:'按类型',byRole:'学术会议里的角色',nodata:'无数据',
   byVenue:'线上 / 线下',byYear:'按年份',
   byTypeHours:'按类型(小时)',byHourOfDay:'会议时段分布','st.hours':'小时',
   'st.count':'个数','stat.metric':'指标',
@@ -932,13 +932,19 @@ function _toRow(r){return{id:r.id,type:r.type||null,name:r.name||null,
   venue_detail:r.venueDetail||null,role:r.role||null,notes:r.notes||null,
   start_time:r.startTime||null,end_time:r.endTime||null,tz:r.tz||null,
   source_id:r.sourceId||null,created_at:r.createdAt||null,edited:!!r.edited,
-  group_id:r.groupId||null}}
+  group_id:r.groupId||null,segments:r.segments||null}}
 function _fromRow(x){return{id:x.id,type:x.type||'',name:x.name||'',
   dateStart:x.date_start||'',dateEnd:x.date_end||'',venueMode:x.venue_mode||'',
   venueDetail:x.venue_detail||'',role:x.role||'',notes:x.notes||'',
   startTime:x.start_time||'',endTime:x.end_time||'',tz:x.tz||'',
   sourceId:x.source_id||'',createdAt:x.created_at||'',edited:!!x.edited,
-  groupId:x.group_id||''}}
+  groupId:x.group_id||'',segments:x.segments||''}}
+// Read a row's per-day overrides (lazy JSON parse). Returns null when no
+// segments are set, otherwise an array of {date, startTime, endTime}.
+function rowSegs(r){
+  if(!r||!r.segments)return null;
+  try{const a=JSON.parse(r.segments);return Array.isArray(a)?a:null;}catch(_){return null;}
+}
 function initCloud(){
   if(SET.supaUrl&&SET.supaKey&&window.supabase){
     try{sb=window.supabase.createClient(SET.supaUrl,SET.supaKey);cloud=true;
@@ -1054,10 +1060,11 @@ async function pushCloud(){
     // missing locally, OR when its id is tombstoned (gcal:/mail: deletes).
     const {data:tombs}=await sb.from('deleted_sync').select('id');
     const tombIds=new Set((tombs||[]).map(r=>r.id));
-    // App-owned id prefixes (manual:, seg:) are reconcile-deleted when
-    // missing locally. gcal:/mail: deletions go through tombstones only.
+    // Anything that didn't come from an external sync source is app-owned
+    // (manual:, seg:, and historical bare-uid rows). Reconcile-delete those
+    // when missing locally. gcal:/mail: deletions go through tombstones.
     const del=(data||[]).map(r=>r.id)
-      .filter(id=>!local.has(id)&&(/^(manual|seg):/.test(id)||tombIds.has(id)));
+      .filter(id=>!local.has(id)&&(!isSynced(id)||tombIds.has(id)));
     if(del.length)await sb.from('meetings').delete().in('id',del);
     // Splice the cloud's Zoom recap block + inbound-outlook's time into our
     // upsert payload for gcal:/mail: rows the user hasn't explicitly edited,
@@ -1481,9 +1488,26 @@ function setStatMetric(m){if(_statMetric===m)return;_statMetric=m;renderStat();}
 function statVal(r){
   return _statMetric==='hours' ? (durMin(r)||0)/60 : 1;
 }
-// Hours rounded to one decimal for display; count stays integer.
+// Pretty-print a decimal-hour value with an explicit unit. 1.5 → "1小时30分"
+// in zh, "1h30m" in en. Whole hours drop the minute part. Used for every
+// time display so non-integer hours never read as a bare integer.
+function fmtHours(h){
+  if(h==null||isNaN(h))return '';
+  const total=Math.round(h*60);
+  if(total<=0)return LANG==='zh'?'0小时':'0h';
+  const hh=Math.floor(total/60), mm=total%60;
+  if(LANG==='zh'){
+    if(mm===0)return hh+'小时';
+    if(hh===0)return mm+'分';
+    return hh+'小时'+mm+'分';
+  }
+  if(mm===0)return hh+'h';
+  if(hh===0)return mm+'m';
+  return hh+'h'+mm+'m';
+}
+// Display string for the current metric: integer count, or fmtHours.
 function statFmt(v){
-  return _statMetric==='hours' ? Math.round(v*10)/10 : v;
+  return _statMetric==='hours' ? fmtHours(v) : v;
 }
 function linkify(s){return esc(s).replace(/(https?:\/\/[^\s<]+)/g,
   '<a href="$1" target="_blank" rel="noopener">$1</a>');}
@@ -1631,24 +1655,34 @@ function tlBlocks(iso){
   });
   let blocks='',allday='';
   onDay.forEach(r=>{
-    if(!r.startTime){
+    // Per-day override via segments JSON. When a row has segments, each
+    // day's start/end is read from that day's segment; days not listed in
+    // the array fall back to the row's bare start/end (so untouched days
+    // of a multi-day event still render with the original time).
+    let st=r.startTime, en=r.endTime;
+    const segs=rowSegs(r);
+    if(segs){
+      const seg=segs.find(s=>s.date===iso);
+      if(seg){st=seg.startTime||''; en=seg.endTime||'';}
+    }
+    if(!st){
       allday+=`<span class="tl-allday-block" data-rid="${r.id}" data-iso="${iso}"
         style="background:${tlbColor(r.type)}" title="${esc(r.name)}">${esc(r.name)}</span>`;
       return;
     }
-    const sm=_hm2min(r.startTime);
-    let em=r.endTime?_hm2min(r.endTime):sm+60;
-    if(em<=sm)em+=1440; // cross-midnight: end is on the next morning
+    const sm=_hm2min(st);
+    let em=en?_hm2min(en):sm+60;
+    if(em<=sm)em+=1440; // cross-midnight
     const top=tlPosMin(sm)/60*TL_HPX;
     let bottom=top+(em-sm)/60*TL_HPX;
-    if(bottom>TL_BODY_PX)bottom=TL_BODY_PX; // clip the next-morning tail
+    if(bottom>TL_BODY_PX)bottom=TL_BODY_PX;
     const h=Math.max(18,bottom-top);
     blocks+=`<div class="tlb" data-rid="${r.id}" data-iso="${iso}"
       style="top:${top}px;height:${h}px;background:${tlbColor(r.type)}"
-      title="${esc(r.name)} ${r.startTime}${r.endTime?'–'+r.endTime:''}">
+      title="${esc(r.name)} ${st}${en?'–'+en:''}">
       <div class="tlb-resize top"></div>
       <span class="tnm">${esc(r.name)}</span>
-      <span class="tmt">${r.startTime}${r.endTime?'–'+r.endTime:''}</span>
+      <span class="tmt">${st}${en?'–'+en:''}</span>
       <div class="tlb-resize bottom"></div></div>`;
   });
   return{blocks,allday};
@@ -1797,17 +1831,35 @@ function tlDragEnd(e){
     newStart=_fmtMin(newMin);
     newEnd=_fmtMin((newMin+d.dur)%1440);
   }
-  // If this is a slice of a multi-day event, split into per-day rows first
-  // so dragging one day only changes that day's time / date.
-  let r=d.r;
-  if(r.dateEnd && r.dateEnd!==r.dateStart){
-    const splits=splitMultiDay(r);
-    r=splits.find(s=>s.dateStart===d.origIso)||splits[0];
+  const r=d.r;
+  // Multi-day (or already-segmented) event: per-day time lives in r.segments.
+  // The list stays as one row; only the dragged day's segment changes.
+  if((r.dateEnd && r.dateEnd!==r.dateStart) || rowSegs(r)){
+    let segs=rowSegs(r);
+    if(!segs){
+      // Initialise: each spanned day gets a segment seeded with the row's
+      // current start/end so unchanged days keep the original time.
+      segs=[];
+      eachDay(r.dateStart,r.dateEnd||r.dateStart,iso=>
+        segs.push({date:iso,startTime:r.startTime||'',endTime:r.endTime||''}));
+    }
+    let seg=segs.find(s=>s.date===d.origIso);
+    if(!seg){seg={date:d.origIso,startTime:'',endTime:''};segs.push(seg);}
+    seg.date=newIso;
+    seg.startTime=newStart;
+    seg.endTime=newEnd;
+    // Re-anchor dateStart/dateEnd to the segment range so the list still
+    // shows the right "date range" for the event.
+    const dates=segs.map(s=>s.date).sort();
+    r.dateStart=dates[0];
+    r.dateEnd=dates[dates.length-1]===dates[0]?'':dates[dates.length-1];
+    r.segments=JSON.stringify(segs);
+  } else {
+    r.dateStart=newIso;
+    r.dateEnd='';
+    r.startTime=newStart;
+    r.endTime=newEnd;
   }
-  r.dateStart=newIso;
-  r.dateEnd='';
-  r.startTime=newStart;
-  r.endTime=newEnd;
   r.tz=newStart?(r.tz||'America/New_York'):'';
   r.edited=true;
   persist();
@@ -1863,25 +1915,39 @@ function tlResizeEnd(e){
   d.handle.removeEventListener('pointercancel', tlResizeEnd);
   if(!d.moved){d.el.classList.remove('dragging');return;}
   d.el._wasDragged=true;
-  // Resizing one day of a multi-day event splits it into per-day rows first
-  // so this day's duration changes independently.
-  let r=d.r;
-  if(r.dateEnd && r.dateEnd!==r.dateStart){
-    const dayISO=d.el.dataset.iso;
-    const splits=splitMultiDay(r);
-    r=splits.find(s=>s.dateStart===dayISO)||splits[0];
-  }
+  const r=d.r;
+  // Compute the new start/end strings from the dragged top/height.
+  let newStart, newEnd;
   if(d.edge==='top'){
     const nt=parseFloat(d.el.style.top);
     const offMin=Math.round((nt/TL_HPX*60)/15)*15;
     const newStartMin=((offMin+TL_H0*60)%1440+1440)%1440;
-    r.startTime=_fmtMin(newStartMin);
-    r.endTime=_fmtMin(d.origEnd%1440);
+    newStart=_fmtMin(newStartMin);
+    newEnd=_fmtMin(d.origEnd%1440);
   } else {
     const nh=parseFloat(d.el.style.height);
     const durMin=Math.max(15, Math.round((nh/TL_HPX*60)/15)*15);
-    r.startTime=_fmtMin(d.origStart%1440);
-    r.endTime=_fmtMin((d.origStart+durMin)%1440);
+    newStart=_fmtMin(d.origStart%1440);
+    newEnd=_fmtMin((d.origStart+durMin)%1440);
+  }
+  // Multi-day or already-segmented: store per-day in r.segments; the list
+  // entry stays as a single row.
+  if((r.dateEnd && r.dateEnd!==r.dateStart) || rowSegs(r)){
+    const dayISO=d.el.dataset.iso;
+    let segs=rowSegs(r);
+    if(!segs){
+      segs=[];
+      eachDay(r.dateStart,r.dateEnd||r.dateStart,iso=>
+        segs.push({date:iso,startTime:r.startTime||'',endTime:r.endTime||''}));
+    }
+    let seg=segs.find(s=>s.date===dayISO);
+    if(!seg){seg={date:dayISO,startTime:'',endTime:''};segs.push(seg);}
+    seg.startTime=newStart;
+    seg.endTime=newEnd;
+    r.segments=JSON.stringify(segs);
+  } else {
+    r.startTime=newStart;
+    r.endTime=newEnd;
   }
   r.tz=r.tz||'America/New_York';
   r.edited=true;
@@ -2110,12 +2176,14 @@ function renderHero(){
 }
 function cbars(c,items){
   if(!items.length){c.innerHTML=`<div class="empty" style="padding:24px">${t('nodata')}</div>`;return}
-  const max=Math.max(1,...items.map(i=>i.v));
-  c.innerHTML=items.map(i=>`<div class="bar-row"${i.go
-      ?` style="cursor:pointer" onclick='goList(${JSON.stringify(i.go)})'`:''}>
-    <div class="lab">${esc(i.k)}</div>
-    <div class="bar-track"><div class="bar-fill" data-w="${i.v/max*100}"></div></div>
-    <div class="val">${i.v}</div></div>`).join('');
+  const max=Math.max(0.0001,...items.map(i=>+i.v||0));
+  c.innerHTML=items.map(i=>{
+    const disp=(i.vd!==undefined&&i.vd!==null)?i.vd:i.v;
+    return `<div class="bar-row"${i.go
+        ?` style="cursor:pointer" onclick='goList(${JSON.stringify(i.go)})'`:''}>
+      <div class="lab">${esc(i.k)}</div>
+      <div class="bar-track"><div class="bar-fill" data-w="${(+i.v||0)/max*100}"></div></div>
+      <div class="val">${disp}</div></div>`;}).join('');
   requestAnimationFrame(()=>c.querySelectorAll('.bar-fill')
     .forEach(b=>b.style.width=b.dataset.w+'%'));
 }
@@ -2148,11 +2216,11 @@ function renderStat(){
   });
   const mmax=Math.max(0.0001,...mc);
   document.getElementById('monthChart').innerHTML=mc.map((v,i)=>{
-    const disp=statFmt(v);
+    const disp=v>0?statFmt(v):'';
     return `<div class="mbar" style="cursor:pointer"
-      title="${esc(monLabel(i+1))} ${yr}: ${disp}"
+      title="${esc(monLabel(i+1))} ${yr}: ${disp||0}"
       onclick='goList(${JSON.stringify({year:yr,month:i+1})})'>
-    <div class="mv">${disp||''}</div><div class="fill" data-h="${v/mmax*100}"></div>
+    <div class="mv">${disp}</div><div class="fill" data-h="${v/mmax*100}"></div>
     <div class="mn">${monShort(i+1)}</div></div>`;}).join('');
   requestAnimationFrame(()=>document.querySelectorAll('#monthChart .fill')
     .forEach(f=>f.style.height=f.dataset.h+'%'));
@@ -2174,19 +2242,19 @@ function renderStat(){
     const v=statVal(r);if(v)o[k]=(o[k]||0)+v;});return o;};
   const bt=agg(r=>r.type);
   cbars(document.getElementById('byType'),Object.keys(bt).sort((a,b)=>bt[b]-bt[a])
-    .map(k=>({k:typeLabel(k),v:statFmt(bt[k]),go:{type:k,year:sy}})));
+    .map(k=>({k:typeLabel(k),v:bt[k],vd:statFmt(bt[k]),go:{type:k,year:sy}})));
   const br=agg(r=>r.type==='conference'?(r.role||'(—)'):null);
   cbars(document.getElementById('byRole'),Object.keys(br).sort((a,b)=>br[b]-br[a])
-    .map(k=>({k,v:statFmt(br[k])})));
+    .map(k=>({k,v:br[k],vd:statFmt(br[k])})));
   const bv=agg(r=>r.venueMode||null);
   cbars(document.getElementById('byVenue'),Object.keys(bv).sort((a,b)=>bv[b]-bv[a])
-    .map(k=>({k:k==='线上'?t('online'):k==='线下'?t('offline'):k,v:statFmt(bv[k])})));
+    .map(k=>({k:k==='线上'?t('online'):k==='线下'?t('offline'):k,v:bv[k],vd:statFmt(bv[k])})));
   const by={};DB.forEach(r=>{
     const k=(r.dateStart||'').slice(0,4);if(!k)return;
     const v=statVal(r);if(v)by[k]=(by[k]||0)+v;
   });
   cbars(document.getElementById('byYear'),Object.keys(by).sort().reverse()
-    .map(k=>({k,v:statFmt(by[k]),go:{year:k}})));
+    .map(k=>({k,v:by[k],vd:statFmt(by[k]),go:{year:k}})));
   // --- Time-based stats (added once meetings carry start/end times) ---
   // Total hours card, appended after the existing count cards. Records with
   // no time are skipped; a record with start_time only counts as 60 min.
@@ -2194,15 +2262,15 @@ function renderStat(){
   const sc=document.getElementById('statCards');
   if(sc){
     sc.insertAdjacentHTML('beforeend',
-      `<div class="stat"><div class="n">${(totMin/60).toFixed(1)}</div>`+
+      `<div class="stat"><div class="n">${esc(fmtHours(totMin/60))}</div>`+
       `<div class="l">${t('st.hours')}</div></div>`);
   }
-  // Hours by type — same chart as byType but values in hours (one decimal).
+  // Hours by type — total hours per type, with units in the display label.
   const bth={};
   D.forEach(r=>{const m=durMin(r);if(m!=null)bth[r.type]=(bth[r.type]||0)+m});
   cbars(document.getElementById('byTypeHours'),Object.keys(bth)
     .sort((a,b)=>bth[b]-bth[a])
-    .map(k=>({k:typeLabel(k),v:Math.round(bth[k]/6)/10,go:{type:k,year:sy}})));
+    .map(k=>({k:typeLabel(k),v:bth[k]/60,vd:fmtHours(bth[k]/60),go:{type:k,year:sy}})));
   // Meeting start-hour distribution. Bars are ordered to match the timeline
   // (07:00 → 06:00) so the visual story matches the calendar view.
   const hod={};
