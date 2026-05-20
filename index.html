@@ -683,7 +683,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20r';
+const BUILD='2026-05-20s';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -1652,14 +1652,49 @@ const TL_H0=7, TL_HPX=48, TL_HOURS=24;
 const TL_BODY_PX=TL_HOURS*TL_HPX;
 // Minutes from grid start (7am) to wall-clock time hm (mod 24h).
 function tlPosMin(m){return ((m-TL_H0*60)%1440+1440)%1440;}
-// Meeting duration in minutes, or null when no start time. End defaults to
-// start+60min when missing; a cross-midnight end (em<=sm) is wrapped.
+// Meeting duration in minutes. Segments-aware: a row with per-day segments
+// returns the SUM of every day's slot (a 2-day STATGEN with 11:00-22:00 on
+// each day = 1320 minutes). For non-segmented rows, falls back to the
+// bare start/end (default 60 min when end is missing, cross-midnight wrap).
 function durMin(r){
-  if(!r||!r.startTime)return null;
+  if(!r)return null;
+  const segs=rowSegs(r);
+  if(segs){
+    let total=0;
+    for(const s of segs){
+      if(!s.startTime)continue;
+      const sm=_hm2min(s.startTime);
+      let em=s.endTime?_hm2min(s.endTime):sm+60;
+      if(em<=sm)em+=1440;
+      total+=em-sm;
+    }
+    return total>0?total:null;
+  }
+  if(!r.startTime)return null;
   const sm=_hm2min(r.startTime);
   let em=r.endTime?_hm2min(r.endTime):sm+60;
   if(em<=sm)em+=1440;
   return em-sm;
+}
+// Per-day hours contribution of a row: a segmented row hits each segment's
+// own date with that segment's duration; a non-segmented timed row hits
+// its date_start with the bare duration. Returns [{date,hours}, ...].
+function rowDayHours(r){
+  if(!r)return [];
+  const segs=rowSegs(r);
+  if(segs){
+    return segs.filter(s=>s.startTime).map(s=>{
+      const sm=_hm2min(s.startTime);
+      let em=s.endTime?_hm2min(s.endTime):sm+60;
+      if(em<=sm)em+=1440;
+      return {date:s.date,hours:(em-sm)/60};
+    });
+  }
+  if(!r.dateStart||!r.startTime)return [];
+  const sm=_hm2min(r.startTime);
+  let em=r.endTime?_hm2min(r.endTime):sm+60;
+  if(em<=sm)em+=1440;
+  return [{date:(r.dateStart||'').slice(0,10),hours:(em-sm)/60}];
 }
 const _typeColor={
   '组会':'#3b82f6','Project meeting':'#94a3b8','seminar':'#16a34a',
@@ -2423,16 +2458,29 @@ function renderStat(){
   });
   const yr=sy||new Date().getFullYear().toString();
   document.getElementById('monthTitle').textContent=t('monthly.y',{y:yr});
-  // Monthly bars + busiest-day index, both metric-aware.
+  // Monthly bars + busiest-day index, both metric-aware. Hours mode buckets
+  // each segment of a multi-day event into its OWN day (so a conference
+  // 5/18 11-22 + 5/19 11-22 gives 11h to 5/18 and 11h to 5/19, not 1h to
+  // 5/18 only). Count mode still buckets by date_start (1 event = 1 mark).
   const mc=new Array(12).fill(0);
   const dayAcc={};
-  DB.forEach(r=>{
-    const ds=(r.dateStart||'');
-    if(!ds.startsWith(yr))return;
-    const v=statVal(r);if(!v)return;
-    const m=parseInt(ds.slice(5,7),10)-1;if(m>=0&&m<12)mc[m]+=v;
-    const dd=ds.slice(0,10);if(dd)dayAcc[dd]=(dayAcc[dd]||0)+v;
-  });
+  if(_statMetric==='hours'){
+    DB.forEach(r=>{
+      rowDayHours(r).forEach(d=>{
+        if(!d.date||!d.date.startsWith(yr))return;
+        const m=parseInt(d.date.slice(5,7),10)-1;
+        if(m>=0&&m<12)mc[m]+=d.hours;
+        dayAcc[d.date]=(dayAcc[d.date]||0)+d.hours;
+      });
+    });
+  } else {
+    DB.forEach(r=>{
+      const ds=(r.dateStart||'');
+      if(!ds.startsWith(yr))return;
+      const m=parseInt(ds.slice(5,7),10)-1;if(m>=0&&m<12)mc[m]+=1;
+      const dd=ds.slice(0,10);if(dd)dayAcc[dd]=(dayAcc[dd]||0)+1;
+    });
+  }
   const mmax=Math.max(0.0001,...mc);
   document.getElementById('monthChart').innerHTML=mc.map((v,i)=>{
     const disp=v>0?statFmt(v):'';
@@ -2482,10 +2530,16 @@ function renderStat(){
     .sort((a,b)=>bth[b]-bth[a])
     .map(k=>({k:typeLabel(k),v:bth[k]/60,vd:fmtHours(bth[k]/60),go:{type:k,year:sy}})));
   // Meeting start-hour distribution. Bars are ordered to match the timeline
-  // (07:00 → 06:00) so the visual story matches the calendar view.
+  // (07:00 → 06:00). Counts EACH segment of a multi-day event separately
+  // so a conference with two daily slots shows up twice in this chart.
   const hod={};
-  D.forEach(r=>{if(!r.startTime)return;
-    const h=Math.floor(_hm2min(r.startTime)/60);hod[h]=(hod[h]||0)+1;});
+  D.forEach(r=>{
+    const segs=rowSegs(r);
+    if(segs){segs.forEach(s=>{if(s.startTime){
+      const h=Math.floor(_hm2min(s.startTime)/60);hod[h]=(hod[h]||0)+1;}});}
+    else if(r.startTime){
+      const h=Math.floor(_hm2min(r.startTime)/60);hod[h]=(hod[h]||0)+1;}
+  });
   const hodOrder=[];for(let i=0;i<24;i++)hodOrder.push((7+i)%24);
   cbars(document.getElementById('byHourOfDay'),
     hodOrder.map(h=>({k:String(h).padStart(2,'0')+':00',v:hod[h]||0})));
@@ -2496,10 +2550,11 @@ function renderHeatmap(){
   const box=document.getElementById('heatmap');if(!box)return;
   const cnt={};
   if(_statMetric==='hours'){
-    // Hours mode: a meeting's hours live at its start date; no eachDay
-    // (otherwise a multi-day event without per-day times would multiply).
-    DB.forEach(r=>{const ds=(r.dateStart||'').slice(0,10);if(!ds)return;
-      const v=statVal(r);if(v)cnt[ds]=(cnt[ds]||0)+v;});
+    // Hours mode: per-segment hours land on each segment's own date; a
+    // non-segmented row's bare duration lands on its date_start.
+    DB.forEach(r=>{rowDayHours(r).forEach(d=>{
+      if(d.date)cnt[d.date]=(cnt[d.date]||0)+d.hours;
+    });});
   } else {
     DB.forEach(r=>eachDay((r.dateStart||'').slice(0,10),(r.dateEnd||'').slice(0,10),
       iso=>cnt[iso]=(cnt[iso]||0)+1));
