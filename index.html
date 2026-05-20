@@ -580,6 +580,8 @@
       <div class="card"><div class="chart-title" data-i18n="byRole"></div><div id="byRole"></div></div>
       <div class="card"><div class="chart-title" data-i18n="byVenue"></div><div id="byVenue"></div></div>
       <div class="card"><div class="chart-title" data-i18n="byYear"></div><div id="byYear"></div></div>
+      <div class="card"><div class="chart-title" data-i18n="byTypeHours"></div><div id="byTypeHours"></div></div>
+      <div class="card"><div class="chart-title" data-i18n="byHourOfDay"></div><div id="byHourOfDay"></div></div>
     </div>
   </section>
 
@@ -634,7 +636,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20i';
+const BUILD='2026-05-20j';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -705,6 +707,7 @@ const I18N={
   monthly:'Monthly distribution','monthly.y':'Monthly distribution · {y}',
   byType:'By type',byRole:'Roles within conferences',nodata:'No data',
   byVenue:'Online vs in-person',byYear:'By year',
+  byTypeHours:'Hours by type',byHourOfDay:'When meetings happen','st.hours':'Hours',
   'stat.year':'Year','l.sort':'Sort',
   'sort.dd':'Date ↓ (newest)','sort.da':'Date ↑ (oldest)','sort.nm':'Name A–Z',
   'd.type':'Type','d.venue':'Location','d.role':'Role','d.notes':'Notes',
@@ -819,6 +822,7 @@ const I18N={
   monthly:'月度分布','monthly.y':'{y} 年月度分布',
   byType:'按类型',byRole:'conference 里的角色',nodata:'无数据',
   byVenue:'线上 / 线下',byYear:'按年份',
+  byTypeHours:'按类型(小时)',byHourOfDay:'会议时段分布','st.hours':'小时',
   'stat.year':'年份','l.sort':'排序',
   'sort.dd':'日期 ↓（新→旧）','sort.da':'日期 ↑（旧→新）','sort.nm':'名称 A–Z',
   'd.type':'类型','d.venue':'地点','d.role':'角色','d.notes':'备注',
@@ -1554,6 +1558,15 @@ const TL_H0=7, TL_HPX=48, TL_HOURS=24;
 const TL_BODY_PX=TL_HOURS*TL_HPX;
 // Minutes from grid start (7am) to wall-clock time hm (mod 24h).
 function tlPosMin(m){return ((m-TL_H0*60)%1440+1440)%1440;}
+// Meeting duration in minutes, or null when no start time. End defaults to
+// start+60min when missing; a cross-midnight end (em<=sm) is wrapped.
+function durMin(r){
+  if(!r||!r.startTime)return null;
+  const sm=_hm2min(r.startTime);
+  let em=r.endTime?_hm2min(r.endTime):sm+60;
+  if(em<=sm)em+=1440;
+  return em-sm;
+}
 const _typeColor={
   '组会':'#3b82f6','Project meeting':'#94a3b8','seminar':'#16a34a',
   'conference':'#ea580c','其他':'#a3a3a3'
@@ -2112,6 +2125,30 @@ function renderStat(){
   const by={};DB.forEach(r=>{const k=(r.dateStart||'').slice(0,4);if(k)by[k]=(by[k]||0)+1});
   cbars(document.getElementById('byYear'),Object.keys(by).sort().reverse()
     .map(k=>({k,v:by[k],go:{year:k}})));
+  // --- Time-based stats (added once meetings carry start/end times) ---
+  // Total hours card, appended after the existing count cards. Records with
+  // no time are skipped; a record with start_time only counts as 60 min.
+  const totMin=D.reduce((s,r)=>s+(durMin(r)||0),0);
+  const sc=document.getElementById('statCards');
+  if(sc){
+    sc.insertAdjacentHTML('beforeend',
+      `<div class="stat"><div class="n">${(totMin/60).toFixed(1)}</div>`+
+      `<div class="l">${t('st.hours')}</div></div>`);
+  }
+  // Hours by type — same chart as byType but values in hours (one decimal).
+  const bth={};
+  D.forEach(r=>{const m=durMin(r);if(m!=null)bth[r.type]=(bth[r.type]||0)+m});
+  cbars(document.getElementById('byTypeHours'),Object.keys(bth)
+    .sort((a,b)=>bth[b]-bth[a])
+    .map(k=>({k:typeLabel(k),v:Math.round(bth[k]/6)/10,go:{type:k,year:sy}})));
+  // Meeting start-hour distribution. Bars are ordered to match the timeline
+  // (07:00 → 06:00) so the visual story matches the calendar view.
+  const hod={};
+  D.forEach(r=>{if(!r.startTime)return;
+    const h=Math.floor(_hm2min(r.startTime)/60);hod[h]=(hod[h]||0)+1;});
+  const hodOrder=[];for(let i=0;i<24;i++)hodOrder.push((7+i)%24);
+  cbars(document.getElementById('byHourOfDay'),
+    hodOrder.map(h=>({k:String(h).padStart(2,'0')+':00',v:hod[h]||0})));
   renderHeatmap();
   observeReveals();
 }
