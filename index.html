@@ -634,7 +634,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20h';
+const BUILD='2026-05-20i';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -1545,8 +1545,15 @@ function setView(v){
 let _calY,_calM,_calView='week',_calDay=null;
 // Working-day window for the day/week timeline. Outside this range the
 // timeline collapses (rare, and an all-day strip handles edge cases).
-const TL_H0=7, TL_H1=23, TL_HPX=48;
-const TL_BODY_PX=(TL_H1-TL_H0)*TL_HPX;
+// Timeline grid: a rotated 24-hour window that starts at TL_H0 (7am) and
+// wraps back to TL_H0 the next morning. Each event still belongs to its
+// `date_start` column; its visual position is the offset from TL_H0.
+// Late-night/cross-midnight events render as one continuous block in the
+// same column (end_time < start_time = wrap).
+const TL_H0=7, TL_HPX=48, TL_HOURS=24;
+const TL_BODY_PX=TL_HOURS*TL_HPX;
+// Minutes from grid start (7am) to wall-clock time hm (mod 24h).
+function tlPosMin(m){return ((m-TL_H0*60)%1440+1440)%1440;}
 const _typeColor={
   '组会':'#3b82f6','Project meeting':'#94a3b8','seminar':'#16a34a',
   'conference':'#ea580c','其他':'#a3a3a3'
@@ -1589,10 +1596,11 @@ function tlBlocks(iso){
       return;
     }
     const sm=_hm2min(r.startTime);
-    const em=r.endTime?_hm2min(r.endTime):sm+60;
-    if(em<=sm)return;
-    const top=Math.max(0,(sm-TL_H0*60)/60*TL_HPX);
-    const bottom=Math.min(TL_BODY_PX,(em-TL_H0*60)/60*TL_HPX);
+    let em=r.endTime?_hm2min(r.endTime):sm+60;
+    if(em<=sm)em+=1440; // cross-midnight: end is on the next morning
+    const top=tlPosMin(sm)/60*TL_HPX;
+    let bottom=top+(em-sm)/60*TL_HPX;
+    if(bottom>TL_BODY_PX)bottom=TL_BODY_PX; // clip the next-morning tail
     const h=Math.max(18,bottom-top);
     blocks+=`<div class="tlb" data-rid="${r.id}" data-iso="${iso}"
       style="top:${top}px;height:${h}px;background:${tlbColor(r.type)}"
@@ -1604,8 +1612,32 @@ function tlBlocks(iso){
   });
   return{blocks,allday};
 }
+// Make every column's all-day strip the same height (max across the week)
+// so the hour grid in each .tl-body lines up with the axis on the left,
+// even when one day has many all-day chips and others have none.
+function tlAlignAllDay(){
+  const strips=Array.from(document.querySelectorAll('.tl-cols .tl-allday'));
+  if(!strips.length)return;
+  strips.forEach(s=>s.style.height='');
+  const maxH=strips.reduce((m,s)=>Math.max(m,s.offsetHeight),0);
+  strips.forEach(s=>s.style.height=maxH+'px');
+  const axis=document.querySelector('.tl-axis');
+  const firstCol=strips[0].closest('.tl-col');
+  if(axis&&firstCol){
+    const body=firstCol.querySelector('.tl-body');
+    if(body){
+      const tlTop=firstCol.parentElement.getBoundingClientRect().top;
+      const bodyTop=body.getBoundingClientRect().top;
+      axis.style.paddingTop=(bodyTop-tlTop)+'px';
+    }
+  }
+}
 function tlAxisHtml(){
-  let s='';for(let h=TL_H0;h<TL_H1;h++)s+=`<div>${String(h).padStart(2,'0')}:00</div>`;
+  let s='';
+  for(let i=0;i<TL_HOURS;i++){
+    const h=(TL_H0+i)%24;
+    s+=`<div>${String(h).padStart(2,'0')}:00</div>`;
+  }
   return s;
 }
 // --- Drag-to-reschedule on .tlb blocks ---------------------------------
@@ -1711,18 +1743,18 @@ function tlDragEnd(e){
   if(d.clientY < br.top){
     newStart=''; newEnd='';
   } else {
-    let refMin;
+    let offMin;
     if(d.kind==='timed'){
-      // Use the block's own visual top so the user drops where they see it.
       const px=parseFloat(d.el.style.top);
-      refMin=TL_H0*60 + Math.round((px/TL_HPX*60)/15)*15;
+      offMin=Math.round((px/TL_HPX*60)/15)*15;
     } else {
       const yInBody=Math.max(0, d.clientY - br.top);
-      refMin=TL_H0*60 + Math.round((yInBody/TL_HPX*60)/15)*15;
+      offMin=Math.round((yInBody/TL_HPX*60)/15)*15;
     }
-    const newMin=Math.max(0,Math.min(24*60-d.dur, refMin));
+    // Map grid offset back to absolute wall-clock time (mod 24h).
+    const newMin=((offMin + TL_H0*60)%1440+1440)%1440;
     newStart=_fmtMin(newMin);
-    newEnd=_fmtMin(newMin+d.dur);
+    newEnd=_fmtMin((newMin+d.dur)%1440);
   }
   // If this is a slice of a multi-day event, split into per-day rows first
   // so dragging one day only changes that day's time / date.
@@ -1800,16 +1832,15 @@ function tlResizeEnd(e){
   }
   if(d.edge==='top'){
     const nt=parseFloat(d.el.style.top);
-    const newStartMin=Math.max(0,
-      Math.min(d.origEnd-15, TL_H0*60 + Math.round((nt/TL_HPX*60)/15)*15));
+    const offMin=Math.round((nt/TL_HPX*60)/15)*15;
+    const newStartMin=((offMin+TL_H0*60)%1440+1440)%1440;
     r.startTime=_fmtMin(newStartMin);
-    r.endTime=_fmtMin(d.origEnd);
+    r.endTime=_fmtMin(d.origEnd%1440);
   } else {
     const nh=parseFloat(d.el.style.height);
-    const newEndMin=Math.max(d.origStart+15,
-      Math.min(24*60, d.origStart + Math.round((nh/TL_HPX*60)/15)*15));
-    r.startTime=_fmtMin(d.origStart);
-    r.endTime=_fmtMin(newEndMin);
+    const durMin=Math.max(15, Math.round((nh/TL_HPX*60)/15)*15);
+    r.startTime=_fmtMin(d.origStart%1440);
+    r.endTime=_fmtMin((d.origStart+durMin)%1440);
   }
   r.tz=r.tz||'America/New_York';
   r.edited=true;
@@ -1888,7 +1919,7 @@ function renderDayView(){
         <div class="tl-allday">${allday}</div>
         <div class="tl-body" style="height:${TL_BODY_PX}px">${blocks}</div>
       </div></div></div>`;
-  tlInstallDrag();
+  tlInstallDrag();tlAlignAllDay();
 }
 function renderWeekView(){
   const box=document.getElementById('calBox');
@@ -1916,7 +1947,7 @@ function renderWeekView(){
     ${calTabsHtml()}</div>
     <div class="tl"><div class="tl-axis">${tlAxisHtml()}</div>
       <div class="tl-cols">${cols}</div></div>`;
-  tlInstallDrag();
+  tlInstallDrag();tlAlignAllDay();
 }
 let _recOpener=null;
 function openRec(id){
