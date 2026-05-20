@@ -319,7 +319,11 @@
   .tl-allday{padding:4px;border-bottom:1px dashed var(--line);min-height:18px;
     display:flex;flex-wrap:wrap;gap:3px}
   .tl-allday-block{padding:1px 6px;font-size:10.5px;border-radius:3px;color:#fff;
-    cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+    cursor:grab;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+    touch-action:none;user-select:none}
+  .tl-allday-block:active{cursor:grabbing}
+  .tl-allday-block.dragging{opacity:.7;box-shadow:0 4px 14px rgba(0,0,0,.25);
+    position:relative;z-index:10}
   .tl-body{position:relative;background:repeating-linear-gradient(to bottom,
     transparent,transparent 47px,#eef0f3 47px,#eef0f3 48px)}
   .tlb{position:absolute;left:2px;right:2px;border-radius:4px;padding:3px 6px;
@@ -330,6 +334,10 @@
   .tlb.dragging{opacity:.7;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:10}
   .tlb .tnm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
   .tlb .tmt{opacity:.85;font-size:9.5px}
+  .tlb-resize{position:absolute;left:0;right:0;height:8px;cursor:ns-resize;
+    touch-action:none;z-index:2}
+  .tlb-resize.top{top:0}
+  .tlb-resize.bottom{bottom:0}
   .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
   .banner{font-size:13px;padding:12px 15px;border-radius:10px;margin-bottom:16px;line-height:1.6}
   .banner.warn{background:#fff7e8;border:1px solid #f0dba8;color:#7a5b16}
@@ -626,7 +634,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20d';
+const BUILD='2026-05-20e';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -1539,8 +1547,8 @@ function tlBlocks(iso){
   let blocks='',allday='';
   onDay.forEach(r=>{
     if(!r.startTime){
-      allday+=`<span class="tl-allday-block" style="background:${tlbColor(r.type)}"
-        onclick="openRec('${r.id}')" title="${esc(r.name)}">${esc(r.name)}</span>`;
+      allday+=`<span class="tl-allday-block" data-rid="${r.id}" data-iso="${iso}"
+        style="background:${tlbColor(r.type)}" title="${esc(r.name)}">${esc(r.name)}</span>`;
       return;
     }
     const sm=_hm2min(r.startTime);
@@ -1552,8 +1560,10 @@ function tlBlocks(iso){
     blocks+=`<div class="tlb" data-rid="${r.id}" data-iso="${iso}"
       style="top:${top}px;height:${h}px;background:${tlbColor(r.type)}"
       title="${esc(r.name)} ${r.startTime}${r.endTime?'–'+r.endTime:''}">
+      <div class="tlb-resize top"></div>
       <span class="tnm">${esc(r.name)}</span>
-      <span class="tmt">${r.startTime}${r.endTime?'–'+r.endTime:''}</span></div>`;
+      <span class="tmt">${r.startTime}${r.endTime?'–'+r.endTime:''}</span>
+      <div class="tlb-resize bottom"></div></div>`;
   });
   return{blocks,allday};
 }
@@ -1571,9 +1581,12 @@ function tlAxisHtml(){
 // took place — we set a flag to swallow the synthetic click after a drag.
 let _tlDrag=null;
 function tlInstallDrag(){
-  document.querySelectorAll('.tlb').forEach(el=>{
+  document.querySelectorAll('.tlb, .tl-allday-block').forEach(el=>{
     el.addEventListener('pointerdown', tlDragStart);
     el.addEventListener('click', tlBlockClick);
+  });
+  document.querySelectorAll('.tlb-resize').forEach(el=>{
+    el.addEventListener('pointerdown', tlResizeStart);
   });
 }
 function tlBlockClick(e){
@@ -1581,25 +1594,32 @@ function tlBlockClick(e){
   if(el._wasDragged){el._wasDragged=false;return;}
   openRec(el.dataset.rid);
 }
+const _fmtMin=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 function tlDragStart(e){
   if(e.button!==undefined&&e.button!==0)return;
   const el=e.currentTarget;
   const id=el.dataset.rid;
   const origIso=el.dataset.iso;
   const r=DB.find(x=>x.id===id);
-  if(!r){return;}
+  if(!r)return;
   e.preventDefault();
   const sm=_hm2min(r.startTime);
-  if(sm==null)return; // all-day rows aren't draggable
-  const em=r.endTime?_hm2min(r.endTime):sm+60;
-  const dur=Math.max(15,em-sm);
+  const kind=(sm==null)?'allday':'timed';
+  let dur=60;
+  if(kind==='timed'){
+    const em=r.endTime?_hm2min(r.endTime):sm+60;
+    dur=Math.max(15,em-sm);
+  }
   const cols=Array.from(document.querySelectorAll('.tl-cols .tl-col'));
   const colIsos=cols.map(c=>c.dataset.iso||'');
   const colIdx=Math.max(0,colIsos.indexOf(origIso));
   const colW=cols.length?cols[0].getBoundingClientRect().width:0;
-  _tlDrag={el,id,r,origIso,colIsos,colIdx,colW,dur,shift:0,
-    startX:e.clientX,startY:e.clientY,origTop:parseFloat(el.style.top)||0,
-    moved:false,pointerId:e.pointerId};
+  _tlDrag={el,id,r,origIso,kind,colIsos,colIdx,colW,dur,shift:0,
+    startX:e.clientX,startY:e.clientY,
+    origTop:parseFloat(el.style.top)||0,
+    moved:false,pointerId:e.pointerId,
+    clientX:e.clientX,clientY:e.clientY,
+    op:'move'};
   try{el.setPointerCapture(e.pointerId);}catch(_){}
   el.addEventListener('pointermove', tlDragMove);
   el.addEventListener('pointerup', tlDragEnd);
@@ -1612,10 +1632,16 @@ function tlDragMove(e){
     d.moved=true;d.el.classList.add('dragging');
   }
   if(!d.moved)return;
-  d.el.style.top=(d.origTop+dy)+'px';
-  if(d.colIsos.length>1 && d.colW>0){
-    d.shift=Math.round(dx/d.colW);
-    d.el.style.transform=`translateX(${d.shift*d.colW}px)`;
+  d.clientX=e.clientX; d.clientY=e.clientY;
+  if(d.kind==='timed'){
+    d.el.style.top=(d.origTop+dy)+'px';
+    if(d.colIsos.length>1 && d.colW>0){
+      d.shift=Math.round(dx/d.colW);
+      d.el.style.transform=`translateX(${d.shift*d.colW}px)`;
+    }
+  } else {
+    // All-day chip floats with the pointer.
+    d.el.style.transform=`translate(${dx}px,${dy}px)`;
   }
 }
 function tlDragEnd(e){
@@ -1625,21 +1651,43 @@ function tlDragEnd(e){
   d.el.removeEventListener('pointerup', tlDragEnd);
   d.el.removeEventListener('pointercancel', tlDragEnd);
   if(!d.moved){d.el.classList.remove('dragging');return;}
-  d.el._wasDragged=true; // suppress the synthetic click that follows pointerup
-  // Snap to 15-minute slots; clamp to a valid in-day range.
-  const px=parseFloat(d.el.style.top);
-  const offMin=Math.round((px/TL_HPX*60)/15)*15;
-  let newMin=Math.max(0,Math.min(24*60-d.dur, TL_H0*60+offMin));
-  const fmt=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
-  const newStart=fmt(newMin);
-  const newEnd=fmt(newMin+d.dur);
-  let newIso=d.origIso;
-  if(d.shift && d.colIsos.length>1){
+  d.el._wasDragged=true;
+  // Resolve target column. Timed: snap by horizontal shift; All-day: by
+  // pointer X over a column rect.
+  const cols=Array.from(document.querySelectorAll('.tl-cols .tl-col'));
+  let targetCol=null;
+  if(d.kind==='timed' && d.colIsos.length>1){
     const ni=Math.max(0,Math.min(d.colIsos.length-1, d.colIdx+d.shift));
-    newIso=d.colIsos[ni];
+    targetCol=cols[ni];
+  } else {
+    for(const c of cols){
+      const cr=c.getBoundingClientRect();
+      if(d.clientX>=cr.left && d.clientX<=cr.right){targetCol=c;break;}
+    }
+  }
+  if(!targetCol)targetCol=cols[d.colIdx]||cols[0];
+  const newIso=targetCol.dataset.iso||d.origIso;
+  const body=targetCol.querySelector('.tl-body');
+  const br=body.getBoundingClientRect();
+  // Drop above the grid = all-day; else snap into a 15-min slot.
+  let newStart='', newEnd='';
+  if(d.clientY < br.top){
+    newStart=''; newEnd='';
+  } else {
+    let refMin;
+    if(d.kind==='timed'){
+      // Use the block's own visual top so the user drops where they see it.
+      const px=parseFloat(d.el.style.top);
+      refMin=TL_H0*60 + Math.round((px/TL_HPX*60)/15)*15;
+    } else {
+      const yInBody=Math.max(0, d.clientY - br.top);
+      refMin=TL_H0*60 + Math.round((yInBody/TL_HPX*60)/15)*15;
+    }
+    const newMin=Math.max(0,Math.min(24*60-d.dur, refMin));
+    newStart=_fmtMin(newMin);
+    newEnd=_fmtMin(newMin+d.dur);
   }
   const r=d.r;
-  // Multi-day: keep span by shifting dateEnd by the same day delta.
   if(r.dateEnd && r.dateEnd!==r.dateStart){
     const od=new Date(r.dateStart+'T00:00:00');
     const nd=new Date(newIso+'T00:00:00');
@@ -1653,10 +1701,79 @@ function tlDragEnd(e){
   r.dateStart=newIso;
   r.startTime=newStart;
   r.endTime=newEnd;
-  r.tz=r.tz||'America/New_York';
+  r.tz=newStart?(r.tz||'America/New_York'):'';
   r.edited=true;
   persist();
   toast(LANG==='zh'?'已移动':'Moved','ok');
+  renderCalendar();
+}
+// --- Edge resize (top edge ⇒ change start_time; bottom edge ⇒ end_time)
+function tlResizeStart(e){
+  if(e.button!==undefined&&e.button!==0)return;
+  const handle=e.currentTarget;
+  e.preventDefault();
+  e.stopPropagation();
+  const blk=handle.parentElement;
+  const id=blk.dataset.rid;
+  const r=DB.find(x=>x.id===id);if(!r)return;
+  const sm=_hm2min(r.startTime);if(sm==null)return;
+  const em=r.endTime?_hm2min(r.endTime):sm+60;
+  _tlDrag={
+    op:'resize', edge:handle.classList.contains('top')?'top':'bottom',
+    el:blk, handle, id, r,
+    startY:e.clientY,
+    origTop:parseFloat(blk.style.top)||0,
+    origHeight:parseFloat(blk.style.height)||30,
+    origStart:sm, origEnd:em,
+    moved:false, pointerId:e.pointerId,
+  };
+  try{handle.setPointerCapture(e.pointerId);}catch(_){}
+  handle.addEventListener('pointermove', tlResizeMove);
+  handle.addEventListener('pointerup', tlResizeEnd);
+  handle.addEventListener('pointercancel', tlResizeEnd);
+}
+function tlResizeMove(e){
+  const d=_tlDrag;if(!d||d.op!=='resize')return;
+  const dy=e.clientY-d.startY;
+  if(!d.moved && Math.abs(dy)>3){d.moved=true;d.el.classList.add('dragging');}
+  if(!d.moved)return;
+  if(d.edge==='top'){
+    let nt=d.origTop+dy, nh=d.origHeight-dy;
+    if(nh<18){nh=18;nt=d.origTop+d.origHeight-18;}
+    d.el.style.top=nt+'px';
+    d.el.style.height=nh+'px';
+  } else {
+    let nh=d.origHeight+dy;
+    if(nh<18)nh=18;
+    d.el.style.height=nh+'px';
+  }
+}
+function tlResizeEnd(e){
+  const d=_tlDrag;_tlDrag=null;if(!d||d.op!=='resize')return;
+  try{d.handle.releasePointerCapture(d.pointerId);}catch(_){}
+  d.handle.removeEventListener('pointermove', tlResizeMove);
+  d.handle.removeEventListener('pointerup', tlResizeEnd);
+  d.handle.removeEventListener('pointercancel', tlResizeEnd);
+  if(!d.moved){d.el.classList.remove('dragging');return;}
+  d.el._wasDragged=true;
+  const r=d.r;
+  if(d.edge==='top'){
+    const nt=parseFloat(d.el.style.top);
+    const newStartMin=Math.max(0,
+      Math.min(d.origEnd-15, TL_H0*60 + Math.round((nt/TL_HPX*60)/15)*15));
+    r.startTime=_fmtMin(newStartMin);
+    r.endTime=_fmtMin(d.origEnd);
+  } else {
+    const nh=parseFloat(d.el.style.height);
+    const newEndMin=Math.max(d.origStart+15,
+      Math.min(24*60, d.origStart + Math.round((nh/TL_HPX*60)/15)*15));
+    r.startTime=_fmtMin(d.origStart);
+    r.endTime=_fmtMin(newEndMin);
+  }
+  r.tz=r.tz||'America/New_York';
+  r.edited=true;
+  persist();
+  toast(LANG==='zh'?'已调整':'Resized','ok');
   renderCalendar();
 }
 function renderCalendar(){
