@@ -41,6 +41,19 @@ function htmlToText(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(
+      // Preserve meaningful links inline as "text (url)". Only keep URLs
+      // that point at a Zoom-owned destination — these are the "View
+      // summary / recap" links the user actually needs. Drop the URL for
+      // social / footer / logo anchors, keep only their visible text.
+      /<a\b[^>]*\bhref\s*=\s*["']?([^"'\s>]+)["']?[^>]*>([\s\S]*?)<\/a>/gi,
+      (_full, url, inner) => {
+        const txt = inner.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        if (!/zoom\.(us|com)/i.test(url)) return txt;
+        if (!txt || txt === url) return url;
+        return `${txt} (${url})`;
+      },
+    )
     .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
