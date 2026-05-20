@@ -683,7 +683,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20q';
+const BUILD='2026-05-20r';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -1537,23 +1537,16 @@ function setStatMetric(m){
 function statVal(r){
   return _statMetric==='hours' ? (durMin(r)||0)/60 : 1;
 }
-// Pretty-print a decimal-hour value with an explicit unit. 1.5 → "1小时30分"
-// in zh, "1h30m" in en. Whole hours drop the minute part. Used for every
-// time display so non-integer hours never read as a bare integer.
-function fmtHours(h){
+// Hours as a clean decimal — '106.8' style, trailing '.0' dropped. No
+// unit, so it's friendly for stat cards (big numbers next to a label).
+function fmtHoursBare(h){
   if(h==null||isNaN(h))return '';
-  const total=Math.round(h*60);
-  if(total<=0)return LANG==='zh'?'0小时':'0h';
-  const hh=Math.floor(total/60), mm=total%60;
-  if(LANG==='zh'){
-    if(mm===0)return hh+'小时';
-    if(hh===0)return mm+'分';
-    return hh+'小时'+mm+'分';
-  }
-  if(mm===0)return hh+'h';
-  if(hh===0)return mm+'m';
-  return hh+'h'+mm+'m';
+  if(h<=0)return '0';
+  return (Math.round(h*10)/10).toFixed(1).replace(/\.0$/,'');
 }
+// Same decimal, with the 'h' suffix — for inline values (busiest, bar
+// chart labels, monthly bars, etc.) where the unit needs to be obvious.
+function fmtHours(h){return fmtHoursBare(h)+'h';}
 // Display string for the current metric: integer count, or fmtHours.
 function statFmt(v){
   return _statMetric==='hours' ? fmtHours(v) : v;
@@ -2322,7 +2315,7 @@ function renderHero(){
   box.innerHTML=d.map(s=>
     `<div class="hs"><span class="n">0</span><span class="l">${esc(s.l)}</span></div>`).join('');
   [...box.querySelectorAll('.n')].forEach((el,i)=>{
-    if(_statMetric==='hours')el.textContent=fmtHours(d[i].n);
+    if(_statMetric==='hours')el.textContent=fmtHoursBare(d[i].n);
     else countUp(el,d[i].n);
   });
   renderHeroGreeting();
@@ -2425,7 +2418,7 @@ function renderStat(){
     `<div class="stat" onclick='goList(${JSON.stringify(s.go||{})})'>`
     +`<div class="n">0</div><div class="l">${esc(s.l)}</div></div>`).join('');
   document.querySelectorAll('#statCards .n').forEach((el,i)=>{
-    if(_statMetric==='hours')el.textContent=fmtHours(d[i].n);
+    if(_statMetric==='hours')el.textContent=fmtHoursBare(d[i].n);
     else countUp(el,d[i].n);
   });
   const yr=sy||new Date().getFullYear().toString();
