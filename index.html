@@ -349,6 +349,23 @@
     border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px rgba(255,255,255,.7)}
   .tlb-seg{display:inline-block;margin-left:4px;font-size:11px;opacity:.85}
   .tlb-conflict{outline:2px solid #d97706;outline-offset:-2px}
+  .tl-empty{position:absolute;inset:0;display:flex;align-items:center;
+    justify-content:center;color:var(--muted);font-size:14px;opacity:.65;
+    pointer-events:none;text-align:center;padding:20px;font-style:italic}
+  .tl-now-dot{position:absolute;left:-5px;top:-5px;width:10px;height:10px;
+    border-radius:50%;background:var(--accent);
+    box-shadow:0 0 0 2px rgba(255,255,255,.85);pointer-events:auto;cursor:help}
+  .trivia-bg{position:fixed;inset:0;background:rgba(8,14,40,.55);z-index:300;
+    display:flex;align-items:center;justify-content:center;
+    animation:trvFade .25s ease}
+  @keyframes trvFade{from{opacity:0}to{opacity:1}}
+  .trivia-card{background:#fff;border-radius:14px;padding:24px 28px;
+    max-width:90vw;min-width:260px;box-shadow:0 20px 60px rgba(8,14,40,.35);
+    font-size:14px;color:var(--ink);line-height:1.55;animation:trvUp .3s ease}
+  @keyframes trvUp{from{transform:translateY(8px)}to{transform:none}}
+  .trivia-card h3{margin:0 0 12px;font-size:18px;font-weight:800}
+  .trivia-card .tline{margin:6px 0}
+  .trivia-card .tline .tk{color:var(--muted);margin-right:6px;font-size:12.5px}
   .tlb-conflict::after{content:'!';position:absolute;top:2px;right:3px;font-size:10px;
     font-weight:800;line-height:14px;text-align:center;
     background:#d97706;color:#fff;width:14px;height:14px;border-radius:50%}
@@ -444,7 +461,10 @@
     </div>
     <h1><span class="ic"><img src="assets/app-icon.png" alt=""></span><span data-i18n="brand"></span></h1>
     <p data-i18n="tagline"></p>
-    <p id="buildStamp" style="margin:2px 0 0;font-size:11px;opacity:.5"></p>
+    <p id="heroGreet" style="margin:6px 0 0;font-size:13px;opacity:.78;
+      min-height:18px"></p>
+    <p id="buildStamp" style="margin:2px 0 0;font-size:11px;opacity:.5;
+      cursor:help" title="开发者彩蛋:连点 5 下"></p>
     <div class="hero-stats" id="heroStats"></div>
   </div>
 
@@ -663,7 +683,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20p';
+const BUILD='2026-05-20q';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -1711,6 +1731,14 @@ function tlBlocks(iso){
     const a=timed[i],b=timed[j];
     if(a.sm<b.em && b.sm<a.em){a.conflict=true;b.conflict=true;}
   }
+  // Small flair on today's column: ☀ next to the earliest meeting, 🌙 next
+  // to the latest. Skip when there's only one (don't badge it twice).
+  const todayISO_=lDate(new Date());
+  if(iso===todayISO_ && timed.length){
+    const sorted=timed.slice().sort((a,b)=>a.sm-b.sm);
+    sorted[0].badge='☀';
+    if(sorted.length>1)sorted[sorted.length-1].badge='🌙';
+  }
   let blocks='';
   timed.forEach(t=>{
     const top=tlPosMin(t.sm)/60*TL_HPX;
@@ -1720,24 +1748,29 @@ function tlBlocks(iso){
     const r=t.r;
     const segged=t.hasSegs?'<span class="tlb-seg" title="'
       +esc(LANG==='zh'?'此事件多日分别设置':'per-day segmented')+'">⚏</span>':'';
+    const dayBadge=t.badge?' '+t.badge:'';
     const cls=t.conflict?' tlb-conflict':'';
     blocks+=`<div class="tlb${cls}" data-rid="${r.id}" data-iso="${iso}"
       style="top:${top}px;height:${h}px;background:${tlbColor(r.type)}"
       title="${esc(r.name)} ${t.st}${t.en?'–'+t.en:''}${t.conflict?' · '+esc(LANG==='zh'?'时间冲突':'overlap'):''}">
       <div class="tlb-resize top"></div>
-      <span class="tnm">${esc(r.name)}${segged}</span>
+      <span class="tnm">${esc(r.name)}${dayBadge}${segged}</span>
       <span class="tmt">${t.st}${t.en?'–'+t.en:''}</span>
       <div class="tlb-resize bottom"></div></div>`;
   });
-  // "Now" indicator on today's column, subtle accent-coloured line + dot.
-  const todayISO=lDate(new Date());
-  if(iso===todayISO){
+  // "Now" indicator on today's column. The dot child is the hoverable
+  // element (the thin line itself has pointer-events:none so it never
+  // intercepts a drag below it) and shows the current HH:MM as a tooltip.
+  if(iso===todayISO_){
     const now=new Date();
-    const m=now.getHours()*60+now.getMinutes();
-    const top=tlPosMin(m)/60*TL_HPX;
-    blocks+=`<div class="tl-now" style="top:${top}px"></div>`;
+    const hm=String(now.getHours()).padStart(2,'0')+':'
+      +String(now.getMinutes()).padStart(2,'0');
+    const top=tlPosMin(now.getHours()*60+now.getMinutes())/60*TL_HPX;
+    blocks+=`<div class="tl-now" style="top:${top}px">
+      <span class="tl-now-dot" title="${esc(LANG==='zh'?'现在 ':'now ')+hm}"></span>
+    </div>`;
   }
-  return{blocks,allday};
+  return{blocks,allday,empty:!timed.length&&!allday};
 }
 // Make every column's all-day strip the same height (max across the week)
 // so the hour grid in each .tl-body lines up with the axis on the left,
@@ -2090,7 +2123,11 @@ function renderDayView(){
   const dt=new Date(_calDay+'T00:00:00');
   const wdN=LANG==='zh'?['日','一','二','三','四','五','六']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const wlbl=(LANG==='zh'?'周':'')+wdN[dt.getDay()];
-  const{blocks,allday}=tlBlocks(_calDay);
+  const{blocks,allday,empty}=tlBlocks(_calDay);
+  // Easter-eggy friendly message for an empty day so the view doesn't feel
+  // sterile when there's nothing on the calendar.
+  const emptyMsg=empty?`<div class="tl-empty">${esc(LANG==='zh'
+    ?'今天没安排,休息一下 ☕':'Nothing scheduled — take a break ☕')}</div>`:'';
   box.innerHTML=`<div class="cal-nav">
     <button onclick="calDayShift(-1)" aria-label="prev">‹</button>
     <span class="ttl">${_calDay} ${wlbl}</span>
@@ -2100,7 +2137,7 @@ function renderDayView(){
       <div class="tl-cols"><div class="tl-col" data-iso="${_calDay}">
         <div class="tl-hdr${_calDay===todayISO?' today':''}">${_calDay} ${wlbl}</div>
         <div class="tl-allday">${allday}</div>
-        <div class="tl-body" style="height:${TL_BODY_PX}px">${blocks}</div>
+        <div class="tl-body" style="height:${TL_BODY_PX}px">${blocks}${emptyMsg}</div>
       </div></div></div>`;
   tlInstallDrag();tlAlignAllDay();
 }
@@ -2288,6 +2325,76 @@ function renderHero(){
     if(_statMetric==='hours')el.textContent=fmtHours(d[i].n);
     else countUp(el,d[i].n);
   });
+  renderHeroGreeting();
+}
+// Easter-eggy hero greeting: a time-of-day hello plus, if there's a
+// meeting later today, an inline countdown to the next one. On Friday
+// afternoons, swaps in a "weekend is near" line when there's nothing
+// upcoming. Keeps it short.
+function renderHeroGreeting(){
+  const el=document.getElementById('heroGreet');if(!el)return;
+  const now=new Date(),h=now.getHours(),dow=now.getDay();
+  const zh=LANG==='zh';
+  const greet = h<6?(zh?'夜深了 ☕':'Late night ☕')
+              :h<11?(zh?'早上好 ☀':'Good morning ☀')
+              :h<13?(zh?'午安':'Hi')
+              :h<18?(zh?'下午好':'Good afternoon')
+              :h<22?(zh?'晚上好':'Good evening')
+              :(zh?'夜深了 🌙':'Late night 🌙');
+  const todayISO=lDate(now);
+  const nowMin=h*60+now.getMinutes();
+  let next=null;
+  DB.forEach(r=>{
+    const ds=(r.dateStart||'').slice(0,10);
+    const de=(r.dateEnd||'').slice(0,10)||ds;
+    if(!ds||todayISO<ds||todayISO>de)return;
+    let st=r.startTime;
+    const segs=rowSegs(r);
+    if(segs){const sg=segs.find(s=>s.date===todayISO);if(sg)st=sg.startTime||'';}
+    if(!st)return;
+    const sm=_hm2min(st);if(sm<nowMin)return;
+    const eta=sm-nowMin;
+    if(!next||eta<next.eta)next={r,st,eta};
+  });
+  let line=greet;
+  if(next){
+    const hh=Math.floor(next.eta/60),mm=next.eta%60;
+    const inS=hh>0?(hh+(zh?'小时':'h')+(mm?' '+mm+(zh?'分':'m'):''))
+                  :(mm+(zh?'分':'m'));
+    line+=zh?` · 下一场 ${inS} 后:${next.r.name} (${next.st})`
+            :` · next in ${inS}: ${next.r.name} (${next.st})`;
+  } else if(dow===5 && h>=14){
+    line+=zh?' · 周末就在眼前 ✨':' · weekend is near ✨';
+  }
+  el.textContent=line;
+}
+// 5 quick taps on the build stamp → fun trivia popup with first record /
+// total / longest meeting / most common type. Pure flair; closes on click.
+let _bTaps=0,_bTm=null;
+function showTrivia(){
+  const ds=DB.map(r=>r.dateStart).filter(Boolean).sort();
+  const first=ds[0]||'';
+  const daysAgo=first?Math.floor((Date.now()-new Date(first+'T00:00:00').getTime())/86400000):0;
+  const totMin=DB.reduce((s,r)=>s+(durMin(r)||0),0);
+  let longest=null;
+  DB.forEach(r=>{const m=durMin(r);if(m&&(!longest||m>longest.m))longest={m,r};});
+  const cnt={};DB.forEach(r=>{if(r.type)cnt[r.type]=(cnt[r.type]||0)+1;});
+  const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+  const zh=LANG==='zh';
+  const rows=[];
+  rows.push([zh?'第一条':'first record', first?(first+(daysAgo?` · ${daysAgo} `+(zh?'天前':'days ago'):'')):'—']);
+  rows.push([zh?'总记录':'records', DB.length]);
+  rows.push([zh?'总时长':'total hours', fmtHours(totMin/60)]);
+  if(longest)rows.push([zh?'最长':'longest', `${longest.r.name} · ${fmtHours(longest.m/60)} · ${longest.r.dateStart}`]);
+  if(top)rows.push([zh?'最常见':'top type', `${typeLabel(top[0])} (${top[1]})`]);
+  const html='<div class="trivia-bg" onclick="this.remove()">'
+    +'<div class="trivia-card" onclick="event.stopPropagation()">'
+    +'<h3>🎉 '+(zh?'你发现了彩蛋':'easter egg found')+'</h3>'
+    +rows.map(([k,v])=>`<div class="tline"><span class="tk">${esc(k)}</span><span>${esc(String(v))}</span></div>`).join('')
+    +'<button class="primary" style="margin-top:14px;width:100%" '
+    +'onclick="this.closest(\'.trivia-bg\').remove()">'
+    +(zh?'继续':'cool')+'</button></div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
 }
 function cbars(c,items){
   if(!items.length){c.innerHTML=`<div class="empty" style="padding:24px">${t('nodata')}</div>`;return}
@@ -2496,7 +2603,18 @@ document.addEventListener('keydown',e=>{
   }
 });
 applyLang();resetForm();updateCount();renderHero();observeReveals();
-document.getElementById('buildStamp').textContent='build '+BUILD;
+(()=>{const bs=document.getElementById('buildStamp');
+  bs.textContent='build '+BUILD;
+  bs.addEventListener('click',()=>{
+    _bTaps++;
+    if(_bTm)clearTimeout(_bTm);
+    _bTm=setTimeout(()=>{_bTaps=0;},1800);
+    if(_bTaps>=5){_bTaps=0;showTrivia();}
+  });
+})();
+// Keep the hero countdown fresh (it shows "next in N min"); cheap to redo
+// once a minute and avoids the user staring at a stale ETA.
+setInterval(()=>{if(document.getElementById('heroGreet'))renderHeroGreeting();},60000);
 // Default landing = records tab + calendar view + week timeline on this week.
 // (HTML marks the "add meeting" tab active by default; without the
 // switchTab here the records pane stays hidden behind it.)
