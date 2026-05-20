@@ -584,7 +584,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20a';
+const BUILD='2026-05-20b';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -964,16 +964,44 @@ function renderSyncInfo(){
   if(b)b.textContent=txt;
 }
 let _pushing=false,_pushAgain=false;
+// Recap marker — a row whose cloud notes contains this block was touched by
+// `inbound-outlook`; pushing a stale local copy must not clobber the recap
+// or the recap-corrected time. Mirrors the constant inside `inbound-outlook`.
+const RECAP_RE=/=== Zoom recap \(auto, do not edit between markers\) ===[\s\S]*?=== \/Zoom recap ===/;
 async function pushCloud(){
   if(!cloud)return;
   if(_pushing){_pushAgain=true;return}
   _pushing=true;
   try{
-    const {data}=await sb.from('meetings').select('id');
+    const {data}=await sb.from('meetings').select('id,notes,start_time,end_time,tz');
+    const cloudById=new Map((data||[]).map(r=>[r.id,r]));
     const local=new Set(DB.map(r=>r.id));
-    const del=(data||[]).map(r=>r.id).filter(id=>!local.has(id));
+    // The app owns only `manual:` row lifecycles. `gcal:`/`mail:` rows are
+    // managed by the Edge Functions — DON'T reconcile-delete them on push.
+    // Their user-initiated deletions go via the `deleted_sync` tombstone
+    // table; pushCloud removes a cloud row only when it's a manual row
+    // missing locally, OR when its id is tombstoned (gcal:/mail: deletes).
+    const {data:tombs}=await sb.from('deleted_sync').select('id');
+    const tombIds=new Set((tombs||[]).map(r=>r.id));
+    const del=(data||[]).map(r=>r.id)
+      .filter(id=>!local.has(id)&&(/^manual:/.test(id)||tombIds.has(id)));
     if(del.length)await sb.from('meetings').delete().in('id',del);
-    if(DB.length)await sb.from('meetings').upsert(DB.map(_toRow));
+    // Splice the cloud's Zoom recap block + inbound-outlook's time into our
+    // upsert payload for gcal:/mail: rows the user hasn't explicitly edited,
+    // so a stale local push doesn't overwrite what inbound-outlook wrote
+    // between our last pullCloud and now.
+    const toUpsert=DB.map(_toRow).map(r=>{
+      if(!/^(gcal|mail):/.test(r.id))return r;
+      const cr=cloudById.get(r.id);if(!cr)return r;
+      const recap=(cr.notes||'').match(RECAP_RE)?.[0];
+      if(!recap)return r;
+      const ln=(r.notes||'');
+      const notes=RECAP_RE.test(ln)?ln:(recap+'\n\n'+ln.trim()).trim();
+      const out={...r,notes};
+      if(!r.edited){out.start_time=cr.start_time;out.end_time=cr.end_time;out.tz=cr.tz;}
+      return out;
+    });
+    if(toUpsert.length)await sb.from('meetings').upsert(toUpsert);
   }catch(e){console.warn('pushCloud',e)}
   _pushing=false;
   if(_pushAgain){_pushAgain=false;pushCloud()}
@@ -1256,6 +1284,14 @@ function undoDelete(){
 
 function fmtDate(r){return r.dateEnd&&r.dateEnd!==r.dateStart
   ?r.dateStart+' ~ '+r.dateEnd:r.dateStart}
+// Iterate every ISO date in the inclusive range [ds, de]. Used so a
+// multi-day meeting (date_end > date_start) is counted on every day it
+// spans in the calendar grid and year heatmap, not just its start day.
+function eachDay(ds,de,fn){
+  if(!ds)return;
+  const s=new Date(ds+'T00:00:00');const e=new Date((de||ds)+'T00:00:00');
+  for(const d=new Date(s);d<=e;d.setDate(d.getDate()+1))fn(lDate(d));
+}
 // Pick the form's default timezone from the browser; fall back to ET.
 function defaultTz(){
   const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1354,7 +1390,10 @@ function listFiltered(){
   if(_qr30){const c=new Date();c.setDate(c.getDate()-30);cut=lDate(c);}
   let rows=DB.filter(r=>{
     const d=r.dateStart||'';
-    if(_lday)return d.slice(0,10)===_lday;
+    if(_lday){
+      const ds=d.slice(0,10),de=(r.dateEnd||'').slice(0,10)||ds;
+      return ds&&ds<=_lday&&_lday<=de;
+    }
     if(cut&&d.slice(0,10)<cut)return false;
     return(!y||d.startsWith(y))&&(!mm||d.slice(5,7)===mm)&&(!tp||r.type===tp)&&
       (!q||((r.name||'')+' '+(r.notes||'')+' '+(r.venueDetail||'')).toLowerCase().includes(q));
@@ -1432,7 +1471,8 @@ function renderCalendar(){
     _calM=(fm?fm-1:now.getMonth());
   }
   const cnt={};
-  DB.forEach(r=>{const d=(r.dateStart||'').slice(0,10);if(d)cnt[d]=(cnt[d]||0)+1});
+  DB.forEach(r=>eachDay((r.dateStart||'').slice(0,10),(r.dateEnd||'').slice(0,10),
+    iso=>cnt[iso]=(cnt[iso]||0)+1));
   const first=new Date(_calY,_calM,1);
   const startDow=first.getDay();
   const dim=new Date(_calY,_calM+1,0).getDate();
@@ -1623,7 +1663,8 @@ function renderStat(){
 function renderHeatmap(){
   const box=document.getElementById('heatmap');if(!box)return;
   const cnt={};
-  DB.forEach(r=>{const d=(r.dateStart||'').slice(0,10);if(d)cnt[d]=(cnt[d]||0)+1});
+  DB.forEach(r=>eachDay((r.dateStart||'').slice(0,10),(r.dateEnd||'').slice(0,10),
+    iso=>cnt[iso]=(cnt[iso]||0)+1));
   const max=Math.max(1,...Object.values(cnt));
   const lvl=v=>!v?'':v>=max*.75?' l4':v>=max*.5?' l3':v>=max*.25?' l2':' l1';
   const end=new Date();end.setHours(0,0,0,0);

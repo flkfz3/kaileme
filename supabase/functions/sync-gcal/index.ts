@@ -22,6 +22,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const env = (k: string, d = "") => Deno.env.get(k) ?? d;
 
+// A `meetings` row whose notes contains this block was touched by the
+// `inbound-outlook` Edge Function — its recap and time fields belong to the
+// Zoom email, not the calendar. Used by the cancelled-deletion guard and
+// the non-edited update path so sync-gcal doesn't wipe inbound-outlook's
+// work.
+const RECAP_RE =
+  /=== Zoom recap \(auto, do not edit between markers\) ===[\s\S]*?=== \/Zoom recap ===/;
+
 // Title/keyword -> meeting type. Order matters; first match wins.
 // Rule (per user): ONLY an event whose title is *exactly* "lab meeting"
 // is the real lab meeting (组会). "Magdy's lab meeting", "meet with vet",
@@ -251,9 +259,14 @@ Deno.serve(async (req: Request) => {
     let removed = 0;
     if (cancelledIds.length) {
       const { data: cx } = await sb.from("meetings")
-        .select("id,edited").in("id", cancelledIds);
+        .select("id,edited,notes").in("id", cancelledIds);
+      // A cancelled-in-calendar row that already carries a Zoom recap means
+      // the meeting actually HAPPENED (the recap is post-meeting evidence).
+      // Keep those rows even if the calendar event later got cancelled.
       const killable = (cx || [])
-        .filter((r: any) => r.edited !== true)
+        .filter((r: any) =>
+          r.edited !== true && !RECAP_RE.test(r.notes || "")
+        )
         .map((r: any) => r.id);
       if (killable.length) {
         await sb.from("meetings").delete().in("id", killable);
@@ -271,14 +284,19 @@ Deno.serve(async (req: Request) => {
     //     everything (user's explicit rule).
     //   - otherwise (never edited) every calendar-derived field is refreshed
     //     so an untouched row stays in sync with the calendar and an old
-    //     misclassification self-corrects.
+    //     misclassification self-corrects, EXCEPT — when the row already
+    //     carries a Zoom recap block (added by `inbound-outlook`) the recap
+    //     block is appended back onto the refreshed notes, and the recap's
+    //     time/tz are preserved (the recap is authoritative for time per the
+    //     user's explicit rule). This stops `sync-gcal` from wiping the
+    //     work that `inbound-outlook` did.
     // Manually-created rows (non-"gcal:" ids) are not returned by the
     // calendar at all, so they are never matched and never touched.
     let inserted = 0, updated = 0, skipped = 0;
     if (live.length) {
       const ids = live.map((r) => r.id);
       const { data: exist, error: e1 } = await sb.from("meetings")
-        .select("id,edited").in("id", ids);
+        .select("id,edited,notes,start_time,end_time,tz").in("id", ids);
       if (e1) throw new Error("select existing failed: " + e1.message);
       const exById = new Map(
         (exist || []).map((r: any) => [r.id, r]),
@@ -293,18 +311,33 @@ Deno.serve(async (req: Request) => {
         const ex = exById.get(r.id);
         // App edits win: an edited row is frozen against the calendar.
         if (ex && ex.edited === true) { skipped++; continue; }
-        const { error } = await sb.from("meetings").update({
+        // Preserve the Zoom recap block (and the recap's time) if one is
+        // present — `inbound-outlook` is authoritative there. The recap
+        // goes BEFORE the calendar's notes (which is usually just the
+        // invitation link) — the user actually cares about the recap.
+        const recap = (ex.notes || "").match(RECAP_RE)?.[0] || null;
+        const mergedNotes = recap
+          ? (recap + "\n\n" + (r.notes || "").trim()).trim()
+          : r.notes;
+        const patch: Record<string, unknown> = {
           name: r.name,
           date_start: r.date_start,
           date_end: r.date_end,
-          start_time: r.start_time,
-          end_time: r.end_time,
-          tz: r.tz,
-          notes: r.notes,
+          notes: mergedNotes,
           venue_mode: r.venue_mode,
           venue_detail: r.venue_detail,
           type: r.type,
-        }).eq("id", r.id);
+        };
+        if (recap) {
+          patch.start_time = ex.start_time;
+          patch.end_time = ex.end_time;
+          patch.tz = ex.tz;
+        } else {
+          patch.start_time = r.start_time;
+          patch.end_time = r.end_time;
+          patch.tz = r.tz;
+        }
+        const { error } = await sb.from("meetings").update(patch).eq("id", r.id);
         if (!error) updated++;
       }
     }

@@ -197,9 +197,17 @@ async function findSameDayMatch(
   owner: string,
   date: string,
   canonical: string,
-): Promise<{ id: string; name: string; notes: string | null } | null> {
+): Promise<
+  {
+    id: string;
+    name: string;
+    notes: string | null;
+    start_time: string | null;
+    end_time: string | null;
+  } | null
+> {
   const { data } = await sb.from("meetings")
-    .select("id,name,notes")
+    .select("id,name,notes,start_time,end_time")
     .eq("owner", owner)
     .eq("date_start", date)
     .or("id.like.gcal:%,id.like.manual:%");
@@ -216,9 +224,34 @@ async function findSameDayMatch(
 const OPEN = "=== Zoom recap (auto, do not edit between markers) ===";
 const CLOSE = "=== /Zoom recap ===";
 
-// Insert or replace the recap block inside an existing notes value, so a
-// re-send overwrites its own block instead of stacking duplicates and any
-// text the user wrote outside the markers is preserved.
+// Cut the forwarded-mail noise out of the recap text so only what the user
+// cares about lands in notes: the AI summary section when present, or just
+// the meaningful "View summary"/"… (zoom.us/launch/…)" line when the email
+// is only a link. Drop From/Sent/To/Subject headers, "[EXTERNAL SENDER]"
+// warnings, the Zoom logo/social/footer URLs, and everything below the
+// "Thank you, Zoom Support Team" / "© Zoom Communications" / "Enable
+// summaries" fold.
+function extractRecap(text: string): string {
+  let t = text;
+  t = t.replace(/^(From|Sent|To|Subject)\s*:[^\n]*\n/gm, "");
+  t = t.replace(/^\s*\[EXTERNAL SENDER[^\]]*\]\s*$/gm, "");
+  t = t.replace(
+    /^\s*(?:Zoom\.com\s*)?\(?https?:\/\/(?:zoom\.com|support\.zoom\.us|blog\.zoom\.us|click\.zoom\.us|www\.linkedin\.com|twitter\.com|facebook\.com|youtube\.com)\/?\b[^\n]*\)?\s*$/gim,
+    "",
+  );
+  t = t.replace(/^Meeting assets for [^\n]*are ready!\s*$/gm, "");
+  const fold = t.search(
+    /Thank you,\s*\n\s*Zoom Support Team|Enable summaries for meetings|©\s*\d{4}\s*Zoom\b|55 Almaden Blvd/,
+  );
+  if (fold > -1) t = t.slice(0, fold);
+  return t.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// Insert or replace the recap block inside an existing notes value. The
+// recap goes BEFORE the existing notes (calendar invitations / user
+// comments) — the recap is what the user actually wants to see, the
+// invitation link is fallback context. Re-sends replace the block in place
+// so duplicates don't stack.
 function setRecapBlock(existing: string | null, recap: string): string {
   const block = `${OPEN}\n${recap}\n${CLOSE}`;
   const cur = (existing || "").trim();
@@ -228,8 +261,10 @@ function setRecapBlock(existing: string | null, recap: string): string {
       "[\\s\\S]*?" +
       CLOSE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
   );
-  if (re.test(cur)) return cur.replace(re, block);
-  return `${cur}\n\n${block}`;
+  // Strip any pre-existing block (possibly in the wrong position from an
+  // older version) and reattach the fresh one at the FRONT.
+  const stripped = cur.replace(re, "").trim();
+  return stripped ? `${block}\n\n${stripped}` : block;
 }
 
 Deno.serve(async (req: Request) => {
@@ -277,7 +312,7 @@ Deno.serve(async (req: Request) => {
 
     const parsed = parseRecap(subject, bodyHtml, received);
     const cls = classify(parsed.rawName);
-    const recapText = htmlToText(bodyHtml).slice(0, 10000);
+    const recapText = extractRecap(htmlToText(bodyHtml)).slice(0, 10000);
 
     const sb = createClient(
       env("SUPABASE_URL"),
@@ -300,6 +335,23 @@ Deno.serve(async (req: Request) => {
       if (parsed.startTime) {
         patch.start_time = parsed.startTime;
         patch.tz = parsed.tz;
+        // Shift end_time by the same delta so the meeting's duration is
+        // preserved when the start gets corrected (e.g. 16:00 → 11:05 with
+        // a 17:00 end becomes 12:05, not a 6-hour ghost meeting).
+        if (match.start_time && match.end_time) {
+          const toMin = (hm: string) => {
+            const [h, mm] = hm.split(":").map(Number);
+            return h * 60 + mm;
+          };
+          const oldStart = toMin(match.start_time);
+          const oldEnd = toMin(match.end_time);
+          const newStart = toMin(parsed.startTime);
+          const dur = oldEnd - oldStart;
+          if (dur > 0) {
+            const newEnd = ((newStart + dur) % 1440 + 1440) % 1440;
+            patch.end_time = `${pad(Math.floor(newEnd / 60))}:${pad(newEnd % 60)}`;
+          }
+        }
       }
       const { error } = await sb.from("meetings").update(patch).eq("id", match.id);
       if (error) throw new Error("update failed: " + error.message);
