@@ -255,15 +255,22 @@
   .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
   .cal-wd{font-size:11px;color:var(--muted);text-align:center;
     font-weight:700;padding:4px 0;text-transform:uppercase;letter-spacing:.5px}
-  .cal-cell{min-height:64px;border:1px solid var(--line);border-radius:9px;
-    padding:6px 7px;background:rgba(255,255,255,.55);position:relative;
-    transition:background .14s var(--ease),border-color .14s var(--ease)}
+  .cal-cell{min-height:84px;border:1px solid var(--line);border-radius:9px;
+    padding:5px 6px;background:rgba(255,255,255,.55);position:relative;
+    transition:background .14s var(--ease),border-color .14s var(--ease);
+    display:flex;flex-direction:column;align-items:stretch;gap:2px;min-width:0}
   .cal-cell.empty{background:transparent;border:none}
   .cal-cell.has{cursor:pointer}
   .cal-cell.has:hover{background:#eef3fc;border-color:var(--accent-2)}
   .cal-cell.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-  .cal-cell .dn{font-size:12px;color:var(--muted);font-weight:650}
+  .cal-cell .dn{font-size:12px;color:var(--muted);font-weight:650;
+    align-self:flex-start}
   .cal-cell.has .dn{color:var(--ink)}
+  .cal-chip{font-size:9.5px;padding:1px 5px;border-radius:3px;color:#fff;
+    font-weight:600;line-height:1.35;max-width:100%;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .cal-chip.more{background:transparent;color:var(--muted);font-weight:700;
+    padding:0 4px}
   .cal-badge{position:absolute;right:6px;bottom:6px;font-size:10.5px;
     min-width:18px;height:18px;padding:0 5px;border-radius:999px;
     background:var(--accent);color:#fff;font-weight:700;
@@ -316,8 +323,11 @@
   .tl-body{position:relative;background:repeating-linear-gradient(to bottom,
     transparent,transparent 47px,#eef0f3 47px,#eef0f3 48px)}
   .tlb{position:absolute;left:2px;right:2px;border-radius:4px;padding:3px 6px;
-    color:#fff;font-size:10.5px;line-height:1.2;cursor:pointer;overflow:hidden;
-    box-shadow:0 1px 1px rgba(0,0,0,.1)}
+    color:#fff;font-size:10.5px;line-height:1.2;cursor:grab;overflow:hidden;
+    box-shadow:0 1px 1px rgba(0,0,0,.1);touch-action:none;user-select:none;
+    transition:box-shadow .12s ease}
+  .tlb:active{cursor:grabbing}
+  .tlb.dragging{opacity:.7;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:10}
   .tlb .tnm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
   .tlb .tmt{opacity:.85;font-size:9.5px}
   .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
@@ -616,7 +626,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20c';
+const BUILD='2026-05-20d';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -1487,7 +1497,7 @@ function setView(v){
   document.getElementById('calBox').classList.toggle('hidden',v!=='cal');
   renderList();
 }
-let _calY,_calM,_calView='month',_calDay=null;
+let _calY,_calM,_calView='week',_calDay=null;
 // Working-day window for the day/week timeline. Outside this range the
 // timeline collapses (rare, and an all-day strip handles edge cases).
 const TL_H0=7, TL_H1=23, TL_HPX=48;
@@ -1539,8 +1549,9 @@ function tlBlocks(iso){
     const top=Math.max(0,(sm-TL_H0*60)/60*TL_HPX);
     const bottom=Math.min(TL_BODY_PX,(em-TL_H0*60)/60*TL_HPX);
     const h=Math.max(18,bottom-top);
-    blocks+=`<div class="tlb" style="top:${top}px;height:${h}px;background:${tlbColor(r.type)}"
-      onclick="openRec('${r.id}')" title="${esc(r.name)} ${r.startTime}${r.endTime?'–'+r.endTime:''}">
+    blocks+=`<div class="tlb" data-rid="${r.id}" data-iso="${iso}"
+      style="top:${top}px;height:${h}px;background:${tlbColor(r.type)}"
+      title="${esc(r.name)} ${r.startTime}${r.endTime?'–'+r.endTime:''}">
       <span class="tnm">${esc(r.name)}</span>
       <span class="tmt">${r.startTime}${r.endTime?'–'+r.endTime:''}</span></div>`;
   });
@@ -1549,6 +1560,104 @@ function tlBlocks(iso){
 function tlAxisHtml(){
   let s='';for(let h=TL_H0;h<TL_H1;h++)s+=`<div>${String(h).padStart(2,'0')}:00</div>`;
   return s;
+}
+// --- Drag-to-reschedule on .tlb blocks ---------------------------------
+// Pointer-based so it works on touch too. Vertical drag changes start_time
+// (and end_time is shifted by the same delta, preserving duration); in
+// week view a horizontal drag moves the meeting to another day. Snaps to
+// 15-minute slots on drop. The row is marked edited=true so sync-gcal's
+// freeze rule then protects the change from being clobbered. The block's
+// own click (to open the detail drawer) is preserved when no real drag
+// took place — we set a flag to swallow the synthetic click after a drag.
+let _tlDrag=null;
+function tlInstallDrag(){
+  document.querySelectorAll('.tlb').forEach(el=>{
+    el.addEventListener('pointerdown', tlDragStart);
+    el.addEventListener('click', tlBlockClick);
+  });
+}
+function tlBlockClick(e){
+  const el=e.currentTarget;
+  if(el._wasDragged){el._wasDragged=false;return;}
+  openRec(el.dataset.rid);
+}
+function tlDragStart(e){
+  if(e.button!==undefined&&e.button!==0)return;
+  const el=e.currentTarget;
+  const id=el.dataset.rid;
+  const origIso=el.dataset.iso;
+  const r=DB.find(x=>x.id===id);
+  if(!r){return;}
+  e.preventDefault();
+  const sm=_hm2min(r.startTime);
+  if(sm==null)return; // all-day rows aren't draggable
+  const em=r.endTime?_hm2min(r.endTime):sm+60;
+  const dur=Math.max(15,em-sm);
+  const cols=Array.from(document.querySelectorAll('.tl-cols .tl-col'));
+  const colIsos=cols.map(c=>c.dataset.iso||'');
+  const colIdx=Math.max(0,colIsos.indexOf(origIso));
+  const colW=cols.length?cols[0].getBoundingClientRect().width:0;
+  _tlDrag={el,id,r,origIso,colIsos,colIdx,colW,dur,shift:0,
+    startX:e.clientX,startY:e.clientY,origTop:parseFloat(el.style.top)||0,
+    moved:false,pointerId:e.pointerId};
+  try{el.setPointerCapture(e.pointerId);}catch(_){}
+  el.addEventListener('pointermove', tlDragMove);
+  el.addEventListener('pointerup', tlDragEnd);
+  el.addEventListener('pointercancel', tlDragEnd);
+}
+function tlDragMove(e){
+  const d=_tlDrag;if(!d)return;
+  const dy=e.clientY-d.startY, dx=e.clientX-d.startX;
+  if(!d.moved && (Math.abs(dy)>4||Math.abs(dx)>4)){
+    d.moved=true;d.el.classList.add('dragging');
+  }
+  if(!d.moved)return;
+  d.el.style.top=(d.origTop+dy)+'px';
+  if(d.colIsos.length>1 && d.colW>0){
+    d.shift=Math.round(dx/d.colW);
+    d.el.style.transform=`translateX(${d.shift*d.colW}px)`;
+  }
+}
+function tlDragEnd(e){
+  const d=_tlDrag;_tlDrag=null;if(!d)return;
+  try{d.el.releasePointerCapture(d.pointerId);}catch(_){}
+  d.el.removeEventListener('pointermove', tlDragMove);
+  d.el.removeEventListener('pointerup', tlDragEnd);
+  d.el.removeEventListener('pointercancel', tlDragEnd);
+  if(!d.moved){d.el.classList.remove('dragging');return;}
+  d.el._wasDragged=true; // suppress the synthetic click that follows pointerup
+  // Snap to 15-minute slots; clamp to a valid in-day range.
+  const px=parseFloat(d.el.style.top);
+  const offMin=Math.round((px/TL_HPX*60)/15)*15;
+  let newMin=Math.max(0,Math.min(24*60-d.dur, TL_H0*60+offMin));
+  const fmt=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+  const newStart=fmt(newMin);
+  const newEnd=fmt(newMin+d.dur);
+  let newIso=d.origIso;
+  if(d.shift && d.colIsos.length>1){
+    const ni=Math.max(0,Math.min(d.colIsos.length-1, d.colIdx+d.shift));
+    newIso=d.colIsos[ni];
+  }
+  const r=d.r;
+  // Multi-day: keep span by shifting dateEnd by the same day delta.
+  if(r.dateEnd && r.dateEnd!==r.dateStart){
+    const od=new Date(r.dateStart+'T00:00:00');
+    const nd=new Date(newIso+'T00:00:00');
+    const ddays=Math.round((nd-od)/86400000);
+    if(ddays!==0){
+      const oe=new Date(r.dateEnd+'T00:00:00');
+      oe.setDate(oe.getDate()+ddays);
+      r.dateEnd=lDate(oe);
+    }
+  }
+  r.dateStart=newIso;
+  r.startTime=newStart;
+  r.endTime=newEnd;
+  r.tz=r.tz||'America/New_York';
+  r.edited=true;
+  persist();
+  toast(LANG==='zh'?'已移动':'Moved','ok');
+  renderCalendar();
 }
 function renderCalendar(){
   if(_calY==null){
@@ -1566,23 +1675,35 @@ function renderCalendar(){
 function renderMonthView(){
   const box=document.getElementById('calBox');
   const now=new Date();
-  const cnt={};
+  // Bucket meetings by every iso day they span (multi-day shows in each).
+  const byDay={};
   DB.forEach(r=>eachDay((r.dateStart||'').slice(0,10),(r.dateEnd||'').slice(0,10),
-    iso=>cnt[iso]=(cnt[iso]||0)+1));
+    iso=>(byDay[iso]=byDay[iso]||[]).push(r)));
   const first=new Date(_calY,_calM,1);
   const startDow=first.getDay();
   const dim=new Date(_calY,_calM+1,0).getDate();
   const wd=['wk.sun','wk.mon','wk.tue','wk.wed','wk.thu','wk.fri','wk.sat'];
   const todayISO=lDate(now);
+  const MAX_CHIPS=3;
   let cells='';
   for(let i=0;i<startDow;i++)cells+='<div class="cal-cell empty"></div>';
   for(let d=1;d<=dim;d++){
     const iso=_calY+'-'+String(_calM+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
-    const c=cnt[iso]||0;
+    const rows=byDay[iso]||[];
+    // Sort by start time so earliest meetings show first.
+    rows.sort((a,b)=>(a.startTime||'99:99').localeCompare(b.startTime||'99:99'));
+    const show=rows.slice(0,MAX_CHIPS);
+    let chips=show.map(r=>{
+      const lbl=r.name||typeLabel(r.type);
+      const tt=lbl+(r.startTime?' '+r.startTime:'');
+      return `<span class="cal-chip" style="background:${tlbColor(r.type)}" title="${esc(tt)}">${esc(lbl)}</span>`;
+    }).join('');
+    if(rows.length>MAX_CHIPS)
+      chips+=`<span class="cal-chip more">+${rows.length-MAX_CHIPS}</span>`;
+    const c=rows.length;
     cells+=`<div class="cal-cell${c?' has':''}${iso===todayISO?' today':''}"
       ${c?`onclick="calOpenDay('${iso}')" title="${iso}: ${c}"`:''}>
-      <span class="dn">${d}</span>
-      ${c?`<span class="cal-badge">${c}</span>`:''}</div>`;
+      <span class="dn">${d}</span>${chips}</div>`;
   }
   box.innerHTML=`<div class="cal-nav">
     <button onclick="calShift(-1)" aria-label="${esc(t('cal.prev'))}">‹</button>
@@ -1604,11 +1725,12 @@ function renderDayView(){
     <button onclick="calDayShift(1)" aria-label="next">›</button>
     ${calTabsHtml()}</div>
     <div class="tl"><div class="tl-axis">${tlAxisHtml()}</div>
-      <div class="tl-cols"><div class="tl-col">
+      <div class="tl-cols"><div class="tl-col" data-iso="${_calDay}">
         <div class="tl-hdr${_calDay===todayISO?' today':''}">${_calDay} ${wlbl}</div>
         <div class="tl-allday">${allday}</div>
         <div class="tl-body" style="height:${TL_BODY_PX}px">${blocks}</div>
       </div></div></div>`;
+  tlInstallDrag();
 }
 function renderWeekView(){
   const box=document.getElementById('calBox');
@@ -1622,7 +1744,7 @@ function renderWeekView(){
     const iso=lDate(d);
     const{blocks,allday}=tlBlocks(iso);
     const hdr=(d.getMonth()+1)+'/'+d.getDate()+' '+(LANG==='zh'?'周':'')+wdN[i];
-    cols+=`<div class="tl-col">
+    cols+=`<div class="tl-col" data-iso="${iso}">
       <div class="tl-hdr${iso===todayISO?' today':''}" style="cursor:pointer"
         onclick="calOpenDay('${iso}')" title="${iso}">${hdr}</div>
       <div class="tl-allday">${allday}</div>
@@ -1636,6 +1758,7 @@ function renderWeekView(){
     ${calTabsHtml()}</div>
     <div class="tl"><div class="tl-axis">${tlAxisHtml()}</div>
       <div class="tl-cols">${cols}</div></div>`;
+  tlInstallDrag();
 }
 let _recOpener=null;
 function openRec(id){
@@ -1898,6 +2021,8 @@ document.addEventListener('keydown',e=>{
 });
 applyLang();resetForm();updateCount();renderHero();observeReveals();
 document.getElementById('buildStamp').textContent='build '+BUILD;
+// Default landing = calendar tab, week view centred on the current week.
+setView('cal');
 initCloud();refreshAuthGate();
 </script>
 </body>
