@@ -287,7 +287,39 @@
       box-shadow:0 -14px 44px rgba(7,18,55,.32)}
     #recDrawer.show{transform:none}
     .cal-cell{min-height:48px}
+    .tl-axis{width:34px;font-size:9px}
+    .tl-col .tl-hdr{font-size:10px;padding:3px 2px}
+    .tlb{font-size:10px;padding:2px 4px}
+    .tl-allday{padding:3px;min-height:14px}
+    .cal-tabs button{padding:2px 7px;font-size:10.5px}
   }
+  /* day / week timeline view */
+  .cal-tabs{display:inline-flex;gap:3px;font-size:11px;margin-left:auto}
+  .cal-tabs button{padding:3px 10px;border:1px solid var(--line);background:#fff;
+    border-radius:5px;cursor:pointer;color:var(--muted);font-weight:600;font-size:11.5px}
+  .cal-tabs button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .cal-nav{display:flex;align-items:center;gap:8px}
+  .tl{display:flex;gap:5px;align-items:stretch;margin-top:8px}
+  .tl-axis{width:42px;flex-shrink:0;font-size:10px;color:var(--muted);padding-top:46px}
+  .tl-axis>div{height:48px;text-align:right;padding-right:4px;border-top:1px solid var(--line);
+    box-sizing:border-box}
+  .tl-cols{flex:1;display:flex;gap:4px;min-width:0;overflow-x:auto}
+  .tl-col{flex:1;min-width:80px;border:1px solid var(--line);border-radius:6px;
+    background:#fafbfc;overflow:hidden;display:flex;flex-direction:column}
+  .tl-col .tl-hdr{font-size:11px;font-weight:600;text-align:center;padding:4px;
+    background:#fff;border-bottom:1px solid var(--line)}
+  .tl-col .tl-hdr.today{background:var(--accent);color:#fff}
+  .tl-allday{padding:4px;border-bottom:1px dashed var(--line);min-height:18px;
+    display:flex;flex-wrap:wrap;gap:3px}
+  .tl-allday-block{padding:1px 6px;font-size:10.5px;border-radius:3px;color:#fff;
+    cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .tl-body{position:relative;background:repeating-linear-gradient(to bottom,
+    transparent,transparent 47px,#eef0f3 47px,#eef0f3 48px)}
+  .tlb{position:absolute;left:2px;right:2px;border-radius:4px;padding:3px 6px;
+    color:#fff;font-size:10.5px;line-height:1.2;cursor:pointer;overflow:hidden;
+    box-shadow:0 1px 1px rgba(0,0,0,.1)}
+  .tlb .tnm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+  .tlb .tmt{opacity:.85;font-size:9.5px}
   .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.6}
   .banner{font-size:13px;padding:12px 15px;border-radius:10px;margin-bottom:16px;line-height:1.6}
   .banner.warn{background:#fff7e8;border:1px solid #f0dba8;color:#7a5b16}
@@ -584,7 +616,7 @@
 // Bump on every deploy. Shown in the hero ("build <BUILD>") so you can tell
 // at a glance whether the browser loaded the latest file — and it is the
 // exact cache-bust token to use: open the app with ?v=<BUILD>.
-const BUILD='2026-05-20b';
+const BUILD='2026-05-20c';
 const KEY='kaileme.records.v1', SKEY='kaileme.settings.v1', LKEY='kaileme.lang';
 // Supabase project URL + anon key are baked in so the app is cloud-enabled on
 // EVERY device with no per-device setup. The anon key is public by design
@@ -1455,21 +1487,85 @@ function setView(v){
   document.getElementById('calBox').classList.toggle('hidden',v!=='cal');
   renderList();
 }
-let _calY,_calM;
+let _calY,_calM,_calView='month',_calDay=null;
+// Working-day window for the day/week timeline. Outside this range the
+// timeline collapses (rare, and an all-day strip handles edge cases).
+const TL_H0=7, TL_H1=23, TL_HPX=48;
+const TL_BODY_PX=(TL_H1-TL_H0)*TL_HPX;
+const _typeColor={
+  '组会':'#3b82f6','Project meeting':'#94a3b8','seminar':'#16a34a',
+  'conference':'#ea580c','其他':'#a3a3a3'
+};
+function tlbColor(t){return _typeColor[t]||'#a3a3a3'}
+function _hm2min(hm){if(!hm)return null;const[h,m]=hm.split(':').map(Number);return h*60+m}
 function calShift(d){
   let m=_calM+d,y=_calY;
   if(m<0){m=11;y--}else if(m>11){m=0;y++}
   _calM=m;_calY=y;renderCalendar();
 }
+function calSetView(v){_calView=v;if(!_calDay)_calDay=lDate(new Date());renderCalendar();}
+function calOpenDay(iso){_calView='day';_calDay=iso;renderCalendar();}
+function calDayShift(n){
+  const dt=new Date((_calDay||lDate(new Date()))+'T00:00:00');
+  dt.setDate(dt.getDate()+n);_calDay=lDate(dt);renderCalendar();
+}
+function calWeekShift(n){calDayShift(n*7)}
+function calTabsHtml(){
+  const k=LANG==='zh'?['月','周','日']:['M','W','D'];
+  return `<div class="cal-tabs">
+    <button class="${_calView==='month'?'active':''}" onclick="calSetView('month')">${k[0]}</button>
+    <button class="${_calView==='week'?'active':''}" onclick="calSetView('week')">${k[1]}</button>
+    <button class="${_calView==='day'?'active':''}" onclick="calSetView('day')">${k[2]}</button></div>`;
+}
+// Gather meetings happening on this ISO day (incl. multi-day spans), split
+// into all-day (no start time) and timed; return positioned-block HTML for
+// the timed ones and chips for the all-day ones.
+function tlBlocks(iso){
+  const onDay=DB.filter(r=>{
+    const ds=(r.dateStart||'').slice(0,10);if(!ds)return false;
+    const de=(r.dateEnd||'').slice(0,10)||ds;
+    return ds<=iso&&iso<=de;
+  });
+  let blocks='',allday='';
+  onDay.forEach(r=>{
+    if(!r.startTime){
+      allday+=`<span class="tl-allday-block" style="background:${tlbColor(r.type)}"
+        onclick="openRec('${r.id}')" title="${esc(r.name)}">${esc(r.name)}</span>`;
+      return;
+    }
+    const sm=_hm2min(r.startTime);
+    const em=r.endTime?_hm2min(r.endTime):sm+60;
+    if(em<=sm)return;
+    const top=Math.max(0,(sm-TL_H0*60)/60*TL_HPX);
+    const bottom=Math.min(TL_BODY_PX,(em-TL_H0*60)/60*TL_HPX);
+    const h=Math.max(18,bottom-top);
+    blocks+=`<div class="tlb" style="top:${top}px;height:${h}px;background:${tlbColor(r.type)}"
+      onclick="openRec('${r.id}')" title="${esc(r.name)} ${r.startTime}${r.endTime?'–'+r.endTime:''}">
+      <span class="tnm">${esc(r.name)}</span>
+      <span class="tmt">${r.startTime}${r.endTime?'–'+r.endTime:''}</span></div>`;
+  });
+  return{blocks,allday};
+}
+function tlAxisHtml(){
+  let s='';for(let h=TL_H0;h<TL_H1;h++)s+=`<div>${String(h).padStart(2,'0')}:00</div>`;
+  return s;
+}
 function renderCalendar(){
-  const box=document.getElementById('calBox');
-  const now=new Date();
   if(_calY==null){
+    const now=new Date();
     const fy=parseInt(document.getElementById('flt-year').value,10);
     const fm=parseInt(document.getElementById('flt-month').value,10);
     _calY=fy||now.getFullYear();
     _calM=(fm?fm-1:now.getMonth());
   }
+  if(!_calDay)_calDay=lDate(new Date());
+  if(_calView==='day')return renderDayView();
+  if(_calView==='week')return renderWeekView();
+  return renderMonthView();
+}
+function renderMonthView(){
+  const box=document.getElementById('calBox');
+  const now=new Date();
   const cnt={};
   DB.forEach(r=>eachDay((r.dateStart||'').slice(0,10),(r.dateEnd||'').slice(0,10),
     iso=>cnt[iso]=(cnt[iso]||0)+1));
@@ -1484,15 +1580,62 @@ function renderCalendar(){
     const iso=_calY+'-'+String(_calM+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const c=cnt[iso]||0;
     cells+=`<div class="cal-cell${c?' has':''}${iso===todayISO?' today':''}"
-      ${c?`onclick="goList({day:'${iso}'})" title="${iso}: ${c}"`:''}>
+      ${c?`onclick="calOpenDay('${iso}')" title="${iso}: ${c}"`:''}>
       <span class="dn">${d}</span>
       ${c?`<span class="cal-badge">${c}</span>`:''}</div>`;
   }
   box.innerHTML=`<div class="cal-nav">
     <button onclick="calShift(-1)" aria-label="${esc(t('cal.prev'))}">‹</button>
     <span class="ttl">${esc(t('cal.title',{m:monLabel(_calM+1),y:_calY}))}</span>
-    <button onclick="calShift(1)" aria-label="${esc(t('cal.next'))}">›</button></div>
+    <button onclick="calShift(1)" aria-label="${esc(t('cal.next'))}">›</button>
+    ${calTabsHtml()}</div>
     <div class="cal-grid">${wd.map(w=>`<div class="cal-wd">${t(w)}</div>`).join('')}${cells}</div>`;
+}
+function renderDayView(){
+  const box=document.getElementById('calBox');
+  const todayISO=lDate(new Date());
+  const dt=new Date(_calDay+'T00:00:00');
+  const wdN=LANG==='zh'?['日','一','二','三','四','五','六']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const wlbl=(LANG==='zh'?'周':'')+wdN[dt.getDay()];
+  const{blocks,allday}=tlBlocks(_calDay);
+  box.innerHTML=`<div class="cal-nav">
+    <button onclick="calDayShift(-1)" aria-label="prev">‹</button>
+    <span class="ttl">${_calDay} ${wlbl}</span>
+    <button onclick="calDayShift(1)" aria-label="next">›</button>
+    ${calTabsHtml()}</div>
+    <div class="tl"><div class="tl-axis">${tlAxisHtml()}</div>
+      <div class="tl-cols"><div class="tl-col">
+        <div class="tl-hdr${_calDay===todayISO?' today':''}">${_calDay} ${wlbl}</div>
+        <div class="tl-allday">${allday}</div>
+        <div class="tl-body" style="height:${TL_BODY_PX}px">${blocks}</div>
+      </div></div></div>`;
+}
+function renderWeekView(){
+  const box=document.getElementById('calBox');
+  const todayISO=lDate(new Date());
+  const dt=new Date(_calDay+'T00:00:00');
+  const dow=(dt.getDay()+6)%7; // Monday=0
+  dt.setDate(dt.getDate()-dow);
+  const days=[];for(let i=0;i<7;i++){const d=new Date(dt);d.setDate(dt.getDate()+i);days.push(d)}
+  const wdN=LANG==='zh'?['一','二','三','四','五','六','日']:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  let cols='';days.forEach((d,i)=>{
+    const iso=lDate(d);
+    const{blocks,allday}=tlBlocks(iso);
+    const hdr=(d.getMonth()+1)+'/'+d.getDate()+' '+(LANG==='zh'?'周':'')+wdN[i];
+    cols+=`<div class="tl-col">
+      <div class="tl-hdr${iso===todayISO?' today':''}" style="cursor:pointer"
+        onclick="calOpenDay('${iso}')" title="${iso}">${hdr}</div>
+      <div class="tl-allday">${allday}</div>
+      <div class="tl-body" style="height:${TL_BODY_PX}px">${blocks}</div></div>`;
+  });
+  const ttl=lDate(days[0])+' ~ '+lDate(days[6]);
+  box.innerHTML=`<div class="cal-nav">
+    <button onclick="calWeekShift(-1)" aria-label="prev">‹</button>
+    <span class="ttl">${ttl}</span>
+    <button onclick="calWeekShift(1)" aria-label="next">›</button>
+    ${calTabsHtml()}</div>
+    <div class="tl"><div class="tl-axis">${tlAxisHtml()}</div>
+      <div class="tl-cols">${cols}</div></div>`;
 }
 let _recOpener=null;
 function openRec(id){
