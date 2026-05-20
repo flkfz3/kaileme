@@ -93,24 +93,28 @@ function rowFromEvent(ev: any, owner: string) {
   // only have .date and get no time. Store HH:MM in the event's own zone.
   const sDT = ev?.start?.dateTime || "";
   const eDT = ev?.end?.dateTime || "";
-  // Convert whatever zone the Calendar API returned (could be "...-04:00" or
-  // a bare "...Z" UTC) into the user's local zone. Without this, an event
-  // returned in UTC (e.g. "2026-05-21T13:00:00Z" for a 9am EDT meeting)
-  // would be stored as 13:00 — off by the UTC offset.
-  const LOCAL_TZ = "America/New_York";
+  // Convert the Calendar API's dateTime to the owner's display zone, no
+  // matter how the API formatted it — '...-04:00', '...+08:00', or bare
+  // '...Z' UTC all flow through Intl.DateTimeFormat the same way. The
+  // target zone is configurable via the OWNER_TZ env var (default ET) so
+  // moving to a different city / supporting a different user is a one-line
+  // secret change, not a code edit.
+  const OWNER_TZ = env("OWNER_TZ", "America/New_York");
   const toLocalHM = (iso: string): string | null => {
     if (!iso) return null;
     const d = new Date(iso);
     if (isNaN(d.getTime())) return null;
     const p = new Intl.DateTimeFormat("en-US", {
-      timeZone: LOCAL_TZ, hour: "2-digit", minute: "2-digit", hour12: false,
+      timeZone: OWNER_TZ, hour: "2-digit", minute: "2-digit", hour12: false,
     }).formatToParts(d).reduce((o: any, x) => (o[x.type] = x.value, o), {});
     const h = p.hour === "24" ? "00" : p.hour;
     return h + ":" + p.minute;
   };
   const startTime = sDT ? toLocalHM(sDT) : null;
   const endTime = eDT ? toLocalHM(eDT) : null;
-  const tz = sDT ? (ev?.start?.timeZone || LOCAL_TZ) : null;
+  // The stored `tz` is always the zone the wall-clock times are expressed
+  // in — i.e. OWNER_TZ — so downstream display logic doesn't have to guess.
+  const tz = sDT ? OWNER_TZ : null;
   const hay = ((ev.summary || "") + " " + (ev.description || "")).toLowerCase();
   const ty = mapType(ev.summary || "", hay);
   const loc = (ev.location || "").trim();

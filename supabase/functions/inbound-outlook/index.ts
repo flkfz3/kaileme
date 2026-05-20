@@ -157,7 +157,9 @@ function parseRecap(
     rawName,
     date,
     startTime,
-    tz: startTime ? "America/New_York" : null,
+    // Recap-time strings (banner / Topic+Date / Sent header) are printed
+    // in the host's display zone — same as OWNER_TZ used by sync-gcal.
+    tz: startTime ? env("OWNER_TZ", "America/New_York") : null,
   };
 }
 
