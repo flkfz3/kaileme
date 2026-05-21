@@ -277,25 +277,57 @@ Deno.serve(async (req: Request) => {
     const dead = new Set((tomb || []).map((r: any) => r.id));
     const live = rows.filter((r) => !dead.has(r.id));
 
+    // Recurring-instance ids from Google Calendar can be 200+ chars each, so
+    // a .in() filter with many ids overflows the PostgREST URL cap. We
+    // sidestep this entirely by pulling all gcal:%-prefixed rows once,
+    // paginated, into a map. INSERT/DELETE are batched modestly. UPDATE
+    // happens one row at a time anyway.
+    const PAGE = 1000;
+    const fetchAllGcal = async (cols: string) => {
+      const out: any[] = [];
+      let off = 0;
+      while (true) {
+        const { data, error } = await sb.from("meetings")
+          .select(cols).like("id", "gcal:%")
+          .range(off, off + PAGE - 1);
+        if (error) throw new Error(`fetchAllGcal(${cols}) failed: ${error.message}`);
+        if (!data || data.length === 0) break;
+        out.push(...data);
+        if (data.length < PAGE) break;
+        off += PAGE;
+      }
+      return out;
+    };
+    const SMALL_CHUNK = 50;
+    const smallChunked = <T>(arr: T[]): T[][] => {
+      const out: T[][] = [];
+      for (let i = 0; i < arr.length; i += SMALL_CHUNK) {
+        out.push(arr.slice(i, i + SMALL_CHUNK));
+      }
+      return out;
+    };
+
     // Remove rows whose calendar event is now cancelled — only non-edited
     // rows (an edited row is frozen; the user deletes it themselves). Also
     // tombstone them so a stale client push can't resurrect them.
     let removed = 0;
     if (cancelledIds.length) {
-      const { data: cx } = await sb.from("meetings")
-        .select("id,edited,notes").in("id", cancelledIds);
-      // A cancelled-in-calendar row that already carries a Zoom recap means
-      // the meeting actually HAPPENED (the recap is post-meeting evidence).
-      // Keep those rows even if the calendar event later got cancelled.
-      const killable = (cx || [])
+      const cancelSet = new Set(cancelledIds);
+      const allGcal = await fetchAllGcal("id,edited,notes");
+      const killable = allGcal
         .filter((r: any) =>
-          r.edited !== true && !RECAP_RE.test(r.notes || "")
+          cancelSet.has(r.id) && r.edited !== true &&
+          !RECAP_RE.test(r.notes || "")
         )
         .map((r: any) => r.id);
       if (killable.length) {
-        await sb.from("meetings").delete().in("id", killable);
-        await sb.from("deleted_sync")
-          .upsert(killable.map((id: string) => ({ id, owner })));
+        for (const batch of smallChunked(killable)) {
+          await sb.from("meetings").delete().in("id", batch);
+        }
+        for (const batch of smallChunked(killable)) {
+          await sb.from("deleted_sync")
+            .upsert(batch.map((id: string) => ({ id, owner })));
+        }
         removed = killable.length;
       }
     }
@@ -318,17 +350,14 @@ Deno.serve(async (req: Request) => {
     // calendar at all, so they are never matched and never touched.
     let inserted = 0, updated = 0, skipped = 0;
     if (live.length) {
-      const ids = live.map((r) => r.id);
-      const { data: exist, error: e1 } = await sb.from("meetings")
-        .select("id,edited,notes,start_time,end_time,tz").in("id", ids);
-      if (e1) throw new Error("select existing failed: " + e1.message);
-      const exById = new Map(
-        (exist || []).map((r: any) => [r.id, r]),
-      );
+      const exist = await fetchAllGcal("id,edited,notes,start_time,end_time,tz");
+      const exById = new Map(exist.map((r: any) => [r.id, r]));
       const fresh = live.filter((r) => !exById.has(r.id));
       if (fresh.length) {
-        const { error } = await sb.from("meetings").insert(fresh);
-        if (error) throw new Error("insert failed: " + error.message);
+        for (const batch of smallChunked(fresh)) {
+          const { error } = await sb.from("meetings").insert(batch);
+          if (error) throw new Error("insert failed: " + error.message);
+        }
         inserted = fresh.length;
       }
       for (const r of live.filter((x) => exById.has(x.id))) {
