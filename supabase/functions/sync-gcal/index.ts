@@ -78,7 +78,7 @@ function cleanNotes(desc: string): string | null {
   return s ? s.slice(0, 4000) : null;
 }
 
-function rowFromEvent(ev: any, owner: string) {
+function rowFromEvent(ev: any, owner: string, inKaileme: boolean) {
   const start = ev?.start?.date || ev?.start?.dateTime || "";
   const end = ev?.end?.date || ev?.end?.dateTime || "";
   const ds = start.slice(0, 10);
@@ -150,6 +150,9 @@ function rowFromEvent(ev: any, owner: string) {
     source_id: "gcal:" + ev.id,
     created_at: new Date().toISOString(),
     owner,
+    in_kaileme: inKaileme,
+    category: inKaileme ? "meeting" : null,
+    source: "gcal",
   };
 }
 
@@ -247,13 +250,17 @@ Deno.serve(async (req: Request) => {
     const isCancelled = (ev: any) =>
       ev.status === "cancelled" || /cancel/i.test(ev.summary || "");
 
+    // After the timelog merge: pull ALL non-cancelled gcal events into the
+    // `meetings` table. The kaileme app filters in_kaileme=true; the timelog
+    // app sees everything. kwMatch decides whether a fresh event is kaileme-
+    // visible at insert time only — existing rows keep whatever in_kaileme
+    // value they have (user wins over keyword reclassification).
     const rows = items
-      .filter((ev) => !isCancelled(ev) && kwMatch(ev))
-      .map((ev) => rowFromEvent(ev, owner));
+      .filter((ev) => !isCancelled(ev))
+      .map((ev) => rowFromEvent(ev, owner, kwMatch(ev)));
 
     const cancelledIds = items
-      .filter((ev) =>
-        ev.id && isCancelled(ev) && (ev.status === "cancelled" || kwMatch(ev)))
+      .filter((ev) => ev.id && isCancelled(ev))
       .map((ev) => "gcal:" + ev.id);
 
     const sb = createClient(

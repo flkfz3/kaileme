@@ -211,9 +211,13 @@ async function findSameDayMatch(
   // Match any row whose date range contains `date` (not just date_start) —
   // a Zoom recap that arrives on day 2 of a multi-day conference still
   // attaches to that single row instead of creating a duplicate mail: row.
+  // Match only kaileme-visible rows (meeting category). After the timelog
+  // merge, the same `meetings` table can contain non-meeting voice/manual
+  // entries — a Zoom recap should never attach to those.
   const { data } = await sb.from("meetings")
     .select("id,name,notes,start_time,end_time,date_start,date_end")
     .eq("owner", owner)
+    .eq("in_kaileme", true)
     .lte("date_start", date)
     .or("id.like.gcal:%,id.like.manual:%");
   const rows = (data || []).filter((r: any) => {
@@ -397,6 +401,9 @@ Deno.serve(async (req: Request) => {
       created_at: new Date().toISOString(),
       owner,
       edited: false,
+      in_kaileme: true,
+      category: "meeting",
+      source: "mail",
     }, { onConflict: "id" });
     if (error) throw new Error("upsert failed: " + error.message);
 
