@@ -340,10 +340,16 @@ Deno.serve(async (req: Request) => {
     // JSON is primary; accept a plain "SUBJECT:"-style line as a trivial
     // fallback so a misconfigured Shortcut still lands the transcript.
     let transcript = "", spokenAt = "";
+    let name = "", category: string | null = "", startTime = "", endTime = "", notes = "";
     try {
       const j = JSON.parse(raw);
       transcript = (j.transcript || j.text || "").toString();
       spokenAt = (j.spoken_at || j.spokenAt || "").toString();
+      name = (j.name || "").toString().trim();
+      category = (j.category || "").toString().trim();
+      startTime = (j.start_time || j.startTime || "").toString().trim();
+      endTime = (j.end_time || j.endTime || "").toString().trim();
+      notes = (j.notes || "").toString().trim();
     } catch (_) {
       const sm = raw.match(/^SUBJECT:[ \t]*(.*)$/im);
       transcript = sm ? sm[1].trim() : raw.trim();
@@ -356,9 +362,9 @@ Deno.serve(async (req: Request) => {
     if (!spokenAt || isNaN(new Date(spokenAt).getTime())) {
       spokenAt = new Date().toISOString();
     }
-    if (!transcript) {
+    if (!transcript && !name) {
       return new Response(
-        JSON.stringify({ ok: false, error: "empty transcript" }),
+        JSON.stringify({ ok: false, error: "empty transcript and no name" }),
         { status: 400, headers: { ...CORS, "Content-Type": "application/json" } },
       );
     }
@@ -368,6 +374,84 @@ Deno.serve(async (req: Request) => {
       env("SUPABASE_SERVICE_ROLE_KEY"),
       { auth: { persistSession: false } },
     );
+
+    // --- Manual structured mode: when the request carries `name` (and
+    // optionally category/start_time/end_time/notes) we skip the LLM and
+    // persist exactly what the user typed in the "手动记" Shortcut. Both
+    // half-/full-width colons in HH:MM are accepted. Empty start_time uses
+    // spoken_at; empty end_time means "still going".
+    if (name) {
+      const off = isoOffset(spokenAt);
+      const day = localDayParts(spokenAt);
+      if (off === null || !day) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "bad spoken_at" }),
+          { status: 400, headers: { ...CORS, "Content-Type": "application/json" } },
+        );
+      }
+      const parseHM = (s: string): [number, number] | null => {
+        const m = s.replace(/：/g, ":").match(/^(\d{1,2}):(\d{2})$/);
+        if (!m) return null;
+        const h = +m[1], mi = +m[2];
+        if (h > 23 || mi > 59) return null;
+        return [h, mi];
+      };
+      let manStart = spokenAt;
+      const pSt = startTime ? parseHM(startTime) : null;
+      if (pSt) manStart = mkInstant(day, pSt[0], pSt[1], off);
+      let manEnd: string | null = null;
+      const pEn = endTime ? parseHM(endTime) : null;
+      if (pEn) {
+        manEnd = mkInstant(day, pEn[0], pEn[1], off);
+        if (new Date(manEnd).getTime() <= new Date(manStart).getTime()) {
+          // cross-midnight (e.g. 23:00-01:00)
+          const d2 = new Date(manEnd);
+          d2.setUTCDate(d2.getUTCDate() + 1);
+          manEnd = d2.toISOString();
+        }
+      }
+      const inKaileme = category === "meeting";
+      const id = "manual:" + crypto.randomUUID();
+      const row = {
+        id,
+        name,
+        category: category || null,
+        tags: [],
+        source: "manual",
+        transcript: null,
+        in_kaileme: inKaileme,
+        start_at: manStart,
+        end_at: manEnd,
+        date_start: toLocalDate(manStart, tz),
+        date_end: null,
+        start_time: toLocalHM(manStart, tz),
+        end_time: manEnd ? toLocalHM(manEnd, tz) : null,
+        tz,
+        type: inKaileme ? "其他" : null,
+        venue_mode: null,
+        venue_detail: null,
+        role: null,
+        notes: notes || null,
+        owner,
+        edited: true,
+        created_at: new Date().toISOString(),
+      };
+      const { error } = await sb.from("meetings").insert(row);
+      if (error) throw new Error("manual insert failed: " + error.message);
+      const sHM = toLocalHM(manStart, tz);
+      const eHM = manEnd ? toLocalHM(manEnd, tz) : null;
+      const display = eHM ? `${name} ${sHM}–${eHM}` : `${name} ${sHM} 起`;
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          action: "created",
+          id,
+          display,
+          parsed: { name, category: row.category, start_at: manStart, end_at: manEnd, in_kaileme: inKaileme, via: "manual" },
+        }),
+        { headers: { ...CORS, "Content-Type": "application/json" } },
+      );
+    }
 
     // --- Special command: close the open row, insert nothing. ---
     if (isStopCommand(transcript)) {
@@ -412,8 +496,6 @@ Deno.serve(async (req: Request) => {
     // --- Gemini for name + category (and time if heuristic missed). ---
     const llm = await callGemini(transcript, spokenAt, tz);
 
-    let name: string;
-    let category: string | null;
     let tags: string[] = [];
     let startAt: string;
     let endAt: string | null;
