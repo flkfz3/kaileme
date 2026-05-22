@@ -292,6 +292,25 @@ function makeDisplay(
   return name;
 }
 
+// Keyword → category fallback for when Gemini is unavailable (rate-limited or
+// transient error). Covers the user's high-frequency activities so a row is
+// never left uncategorised for the common cases. First match wins.
+function heuristicCategory(transcript: string): string | null {
+  const t = transcript.toLowerCase();
+  const table: [RegExp, string][] = [
+    [/开会|会议|组会|meeting|讨论|汇报|seminar|talk/, "meeting"],
+    [/睡|觉|午睡|小憩|nap|sleep/, "sleep"],
+    [/吃|饭|早餐|午餐|晚餐|早饭|午饭|晚饭|喝|餐|eat|lunch|dinner|breakfast/, "eat"],
+    [/跑步|跑|健身|运动|锻炼|散步|走路|健走|球|游泳|run|gym|workout|exercise|walk/, "exercise"],
+    [/通勤|开车|坐车|地铁|公交|路上|driv|commut|subway|bus/, "commute"],
+    [/写代码|编程|工作|干活|做实验|code|coding|work|debug|实验/, "work"],
+    [/看书|读|学习|复习|上课|听课|read|study|class|course|paper|论文/, "study"],
+    [/看|玩|游戏|刷|休息|放松|电影|剧|game|relax|rest|movie|leisure/, "leisure"],
+  ];
+  for (const [re, cat] of table) if (re.test(t)) return cat;
+  return null;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") {
@@ -330,7 +349,13 @@ Deno.serve(async (req: Request) => {
       transcript = sm ? sm[1].trim() : raw.trim();
     }
     transcript = transcript.trim();
-    if (!spokenAt) spokenAt = new Date().toISOString();
+    // Fall back to server-now when spoken_at is missing OR unparseable. iOS
+    // Shortcuts can serialise a raw Date variable to a localized string
+    // ("2026年5月22日 上午9:07") that new Date() can't read; since the user
+    // logs in real time, now() is a safe anchor.
+    if (!spokenAt || isNaN(new Date(spokenAt).getTime())) {
+      spokenAt = new Date().toISOString();
+    }
     if (!transcript) {
       return new Response(
         JSON.stringify({ ok: false, error: "empty transcript" }),
@@ -411,9 +436,10 @@ Deno.serve(async (req: Request) => {
       }
     } else {
       // Gemini failed — never lose the words. Save raw transcript as name,
-      // use the heuristic time if we got one, leave category null otherwise.
+      // use the heuristic time if we got one, and fall back to a keyword
+      // category guess so common activities still classify.
       name = transcript;
-      category = null;
+      category = heuristicCategory(transcript);
       if (heur) {
         startAt = heur.start_at!;
         endAt = heur.end_at;
