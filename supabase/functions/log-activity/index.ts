@@ -177,6 +177,26 @@ function mkInstant(
   return new Date(utc).toISOString();
 }
 
+// Interpret HH:MM on date YMD as wall-clock time in `tz` and return the UTC
+// ISO instant. Independent of any offset embedded in the request: the iOS
+// "Format Date → ISO 8601" output is unreliable (sometimes Z, sometimes
+// naked, sometimes +offset). The manual-mode handler ALWAYS interprets the
+// user-typed HH:MM in OWNER_TZ via this helper instead, so 23:30 always
+// means "23:30 in my city" regardless of how iOS framed the date.
+function wallToUtc(ymd: string, hm: string, tz: string): string {
+  const naive = new Date(ymd + "T" + hm + ":00");
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hour12: false, year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+  const p = dtf.formatToParts(naive).reduce(
+    (o: any, x) => (x.type !== "literal" ? (o[x.type] = x.value, o) : o), {},
+  );
+  const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+  const offMin = Math.round((asUtc - naive.getTime()) / 60000);
+  return new Date(naive.getTime() - offMin * 60000).toISOString();
+}
+
 // Detect the special "I'm done / going to sleep" command. True only when the
 // transcript is essentially just the marker word (no other activity content).
 function isStopCommand(transcript: string): boolean {
@@ -381,30 +401,35 @@ Deno.serve(async (req: Request) => {
     // half-/full-width colons in HH:MM are accepted. Empty start_time uses
     // spoken_at; empty end_time means "still going".
     if (name) {
-      const off = isoOffset(spokenAt);
-      const day = localDayParts(spokenAt);
-      if (off === null || !day) {
+      // The user typed HH:MM in OWNER_TZ. The day comes from spoken_at
+      // converted to OWNER_TZ (so a request POSTed at 01:02 UTC on May 23 from
+      // an EDT user — which is still May 22 in their city — anchors to May 22,
+      // not May 23). We deliberately ignore any offset hint inside spoken_at:
+      // iOS Shortcuts "Format Date → ISO 8601" output is unreliable across
+      // versions (sometimes Z, sometimes naked, sometimes +offset), so we
+      // always re-anchor against OWNER_TZ.
+      const ymd = toLocalDate(spokenAt, tz);
+      if (!ymd) {
         return new Response(
           JSON.stringify({ ok: false, error: "bad spoken_at" }),
           { status: 400, headers: { ...CORS, "Content-Type": "application/json" } },
         );
       }
-      const parseHM = (s: string): [number, number] | null => {
+      const normalizeHM = (s: string): string | null => {
         const m = s.replace(/：/g, ":").match(/^(\d{1,2}):(\d{2})$/);
         if (!m) return null;
         const h = +m[1], mi = +m[2];
         if (h > 23 || mi > 59) return null;
-        return [h, mi];
+        return `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
       };
-      let manStart = spokenAt;
-      const pSt = startTime ? parseHM(startTime) : null;
-      if (pSt) manStart = mkInstant(day, pSt[0], pSt[1], off);
+      const startHM = startTime ? normalizeHM(startTime) : null;
+      const endHM = endTime ? normalizeHM(endTime) : null;
+      const manStart = startHM ? wallToUtc(ymd, startHM, tz) : spokenAt;
       let manEnd: string | null = null;
-      const pEn = endTime ? parseHM(endTime) : null;
-      if (pEn) {
-        manEnd = mkInstant(day, pEn[0], pEn[1], off);
+      if (endHM) {
+        manEnd = wallToUtc(ymd, endHM, tz);
         if (new Date(manEnd).getTime() <= new Date(manStart).getTime()) {
-          // cross-midnight (e.g. 23:00-01:00)
+          // cross-midnight (e.g. 23:00 → 01:00 the next day)
           const d2 = new Date(manEnd);
           d2.setUTCDate(d2.getUTCDate() + 1);
           manEnd = d2.toISOString();
