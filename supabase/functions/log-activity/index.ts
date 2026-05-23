@@ -197,6 +197,25 @@ function wallToUtc(ymd: string, hm: string, tz: string): string {
   return new Date(naive.getTime() - offMin * 60000).toISOString();
 }
 
+// Bilingual keyword check: does this name (or its category) look like a
+// kaileme-style meeting? Used by both the voice and the manual handler to
+// decide in_kaileme automatically — matches the keyword set baked into
+// sync-gcal so all three entry points converge on the same rule.
+const MEETING_KEYWORDS = [
+  // English
+  "meet", "zoom", "seminar", "conference", "talk", "colloquium",
+  "workshop", "standup", "defense", "presentation", "lecture",
+  // Chinese substrings
+  "会议", "开会", "组会", "研讨", "讲座", "报告", "讨论", "面谈",
+  "例会", "答辩", "评审", "周会", "月会", "答疑", "见面", "培训",
+];
+function isKaileme(name: string | null, category: string | null): boolean {
+  if (category === "meeting") return true;
+  const hay = (name || "").toLowerCase();
+  if (!hay) return false;
+  return MEETING_KEYWORDS.some((k) => hay.includes(k.toLowerCase()));
+}
+
 // Detect the special "I'm done / going to sleep" command. True only when the
 // transcript is essentially just the marker word (no other activity content).
 function isStopCommand(transcript: string): boolean {
@@ -435,7 +454,7 @@ Deno.serve(async (req: Request) => {
           manEnd = d2.toISOString();
         }
       }
-      const inKaileme = category === "meeting";
+      const inKaileme = isKaileme(name, category);
       const id = "manual:" + crypto.randomUUID();
       const row = {
         id,
@@ -556,7 +575,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const inKaileme = category === "meeting";
+    const inKaileme = isKaileme(name, category);
 
     // --- Start-marker close: close the most recent open voice/manual row. ---
     const { data: openRows } = await sb.from("meetings")

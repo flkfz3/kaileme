@@ -172,7 +172,15 @@ Deno.serve(async (req: Request) => {
   try {
     const owner = env("OWNER_USER_ID");
     if (!owner) throw new Error("OWNER_USER_ID not set");
-    const kws = env("GCAL_KEYWORDS", "meet,zoom,seminar,conference,talk,colloquium,workshop")
+    // Bilingual keyword set: English first, then Chinese substrings. A gcal
+    // event whose title/description contains any of these is treated as a
+    // kaileme meeting (in_kaileme=true) on import. The list is overridable
+    // via the GCAL_KEYWORDS secret (comma-separated); the default below is
+    // also kept in sync with log-activity's manual/voice classifier and
+    // with timelog's Add-form auto-judgement.
+    const kws = env("GCAL_KEYWORDS",
+      "meet,zoom,seminar,conference,talk,colloquium,workshop,standup,defense,presentation,lecture," +
+      "会议,开会,组会,研讨,讲座,报告,讨论,面谈,例会,答辩,评审,周会,月会,答疑,见面,培训")
       .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const daysBack = parseInt(env("GCAL_DAYS_BACK", "3650"), 10);
     const calOverride = env("GCAL_CALENDAR", "").trim();

@@ -206,21 +206,25 @@ async function findSameDayMatch(
     notes: string | null;
     start_time: string | null;
     end_time: string | null;
+    in_kaileme: boolean | null;
   } | null
 > {
   // Match any row whose date range contains `date` (not just date_start) —
   // a Zoom recap that arrives on day 2 of a multi-day conference still
   // attaches to that single row instead of creating a duplicate mail: row.
-  // Match only kaileme-visible rows (meeting category). After the timelog
-  // merge, the same `meetings` table can contain non-meeting voice/manual
-  // entries — a Zoom recap should never attach to those.
+  // A Zoom recap is hard evidence the row IS a real meeting, so we don't
+  // restrict matching to in_kaileme=true: a gcal: event that wasn't keyword-
+  // matched at import time (in_kaileme=false) should still pair up with its
+  // recap and get bumped to in_kaileme=true. For manual: rows we keep the
+  // in_kaileme=true filter so a same-day "晨跑" doesn't accidentally absorb
+  // a meeting recap that happens to share characters.
   const { data } = await sb.from("meetings")
-    .select("id,name,notes,start_time,end_time,date_start,date_end")
+    .select("id,name,notes,start_time,end_time,date_start,date_end,in_kaileme")
     .eq("owner", owner)
-    .eq("in_kaileme", true)
     .lte("date_start", date)
     .or("id.like.gcal:%,id.like.manual:%");
   const rows = (data || []).filter((r: any) => {
+    if (r.id.startsWith("manual:") && !r.in_kaileme) return false;
     const ds = (r.date_start || "").slice(0, 10);
     const de = (r.date_end || ds).slice(0, 10);
     return ds && ds <= date && date <= de;
@@ -346,6 +350,14 @@ Deno.serve(async (req: Request) => {
       const patch: Record<string, unknown> = {
         notes: setRecapBlock(match.notes, recapText),
       };
+      // The recap itself is hard evidence this row is a real meeting. If
+      // sync-gcal imported the row without keyword-matching (in_kaileme=false),
+      // bump it now so kaileme finally sees it. Existing in_kaileme=true rows
+      // stay true; never downgrades.
+      if (match.id.startsWith("gcal:") && match.in_kaileme === false) {
+        patch.in_kaileme = true;
+        patch.category = "meeting";
+      }
       if (parsed.startTime) {
         patch.start_time = parsed.startTime;
         patch.tz = parsed.tz;
