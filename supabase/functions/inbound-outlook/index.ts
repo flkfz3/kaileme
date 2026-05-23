@@ -207,6 +207,7 @@ async function findSameDayMatch(
     start_time: string | null;
     end_time: string | null;
     in_kaileme: boolean | null;
+    edited: boolean | null;
   } | null
 > {
   // Match any row whose date range contains `date` (not just date_start) —
@@ -219,7 +220,7 @@ async function findSameDayMatch(
   // in_kaileme=true filter so a same-day "晨跑" doesn't accidentally absorb
   // a meeting recap that happens to share characters.
   const { data } = await sb.from("meetings")
-    .select("id,name,notes,start_time,end_time,date_start,date_end,in_kaileme")
+    .select("id,name,notes,start_time,end_time,date_start,date_end,in_kaileme,edited")
     .eq("owner", owner)
     .lte("date_start", date)
     .or("id.like.gcal:%,id.like.manual:%");
@@ -353,8 +354,14 @@ Deno.serve(async (req: Request) => {
       // The recap itself is hard evidence this row is a real meeting. If
       // sync-gcal imported the row without keyword-matching (in_kaileme=false),
       // bump it now so kaileme finally sees it. Existing in_kaileme=true rows
-      // stay true; never downgrades.
-      if (match.id.startsWith("gcal:") && match.in_kaileme === false) {
+      // stay true; never downgrades. Respect a user override: an edited=true
+      // row that explicitly has in_kaileme=false means the user deliberately
+      // removed it from kaileme — the recap must not overrule that intent.
+      if (
+        match.id.startsWith("gcal:") &&
+        match.in_kaileme === false &&
+        match.edited !== true
+      ) {
         patch.in_kaileme = true;
         patch.category = "meeting";
       }
